@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "items": [
+    { "label": "Replit Home", "href": "{origin}" },
+    { "label": "Replit Create", "href": "{origin}/create" },
+    { "label": "PWA Voice", "href": "https://inti.intellipedia.ai/" },
+    { "label": "UCO Dashboard (session)", "href": "https://inti.intellipedia.ai/uco-test?session={session}" }
+  ]
+}
+
