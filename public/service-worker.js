@@ -1,5 +1,5 @@
 // Enhanced PWA service worker for Inti with better error handling
-const CACHE_NAME = "inti-v2-uco";
+const CACHE_NAME = "inti-v2-uco-v15_6a";
 const urlsToCache = [
   "/",
   "/manifest.json"

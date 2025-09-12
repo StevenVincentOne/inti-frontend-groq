@@ -3,21 +3,17 @@ import { useEffect, useState } from "react";
 export const useBackendServerUrl = () => {
   const [backendServerUrl, setBackendServerUrl] = useState<string | null>(null);
 
-  // Get the backend server URL. This is a bit involved to support different deployment methods.
+  // Compute the HTTP base for health/API calls from window location.
+  // Uses same-origin + '/api' so it works in production behind Traefik
+  // and in dev if the frontend is reverse-proxying to a local backend.
+  // If you need a custom base in local dev, run the dev server with env
+  // and rebuild; we avoid build-time env reliance in client code here.
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const isInDocker = ["true", "1"].includes(process.env.NEXT_PUBLIC_IN_DOCKER?.toLowerCase() || "");
-
-      const prefix = isInDocker ? "/api" : "";
-
-      const backendUrl = new URL("", window.location.href);
-      if (!isInDocker) {
-        backendUrl.port = "8000";
-      }
-      backendUrl.pathname = prefix;
-      backendUrl.search = ""; // strip any query parameters
-      setBackendServerUrl(backendUrl.toString().replace(/\/$/, "")); // remove trailing slash
-    }
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    url.pathname = "/api";
+    url.search = "";
+    setBackendServerUrl(url.toString().replace(/\/$/, ""));
   }, []);
 
   return backendServerUrl;

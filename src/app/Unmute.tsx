@@ -21,6 +21,7 @@ import { useRecordingCanvas } from "./useRecordingCanvas";
 import { useGoogleAnalytics } from "./useGoogleAnalytics";
 import clsx from "clsx";
 import { useBackendServerUrl } from "./useBackendServerUrl";
+import { useRealtimeWebSocketUrl } from "./useRealtimeWebSocketUrl";
 import { COOKIE_CONSENT_STORAGE_KEY } from "./ConsentModal";
 import { IntiFloatingLogo } from "./IntiFloatingLogo";
 import { IntiTextChatSecure as IntiTextChat } from "./components/IntiTextChatSecure";
@@ -44,12 +45,14 @@ const Unmute = () => {
 
   const [shouldConnect, setShouldConnect] = useState(false);
   const backendServerUrl = useBackendServerUrl();
-  const [webSocketUrl, setWebSocketUrl] = useState<string | null>(null);
+  const webSocketUrl = useRealtimeWebSocketUrl();
   const [healthStatus, setHealthStatus] = useState<HealthStatus | null>(null);
   const [errors, setErrors] = useState<ErrorItem[]>([]);
   const [showChat, setShowChat] = useState(false);
   const [showIntiViz, setShowIntiViz] = useState(true);
   const [showUserViz, setShowUserViz] = useState(true);
+  const [sessionReady, setSessionReady] = useState(false);
+  const sessionReadyRef = useRef(false);
   // const [showLiveText, setShowLiveText] = useState(false);
 
   useWakeLock(shouldConnect);
@@ -62,8 +65,6 @@ const Unmute = () => {
   // a "server is down" screen will be shown.
   useEffect(() => {
     if (!backendServerUrl) return;
-
-    setWebSocketUrl(backendServerUrl.toString() + "/v1/realtime");
 
     const checkHealth = async () => {
       try {
@@ -100,13 +101,45 @@ const Unmute = () => {
     checkHealth();
   }, [backendServerUrl]);
 
+  const realtimeProtocols = (() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const override = localStorage.getItem('INTI_WS_SUBPROTOCOL');
+        if (override !== null) {
+          const val = override.trim();
+          if (val.length === 0 || val.toLowerCase() === 'none') return undefined;
+          return [val];
+        }
+      }
+    } catch {}
+    const envVal = (process.env.NEXT_PUBLIC_REALTIME_SUBPROTOCOL || 'realtime').trim();
+    if (envVal.length === 0 || envVal.toLowerCase() === 'none') return undefined;
+    return [envVal];
+  })();
+
+  const socketUrl = shouldConnect ? webSocketUrl : null;
   const { sendMessage, lastMessage, readyState } = useWebSocket(
-    webSocketUrl || null,
+    socketUrl,
     {
-      protocols: ["realtime"],
-    },
-    shouldConnect
+      protocols: realtimeProtocols,
+      onOpen: () => {
+        console.log('[VoiceWS] onOpen: connection established');
+      },
+      onClose: (event) => {
+        console.log('[VoiceWS] onClose:', event.code, event.reason || '(no reason)');
+      },
+    }
   );
+
+  const commitAndRequestResponse = useCallback(() => {
+    try {
+      console.log('[VoiceWS] Committing audio buffer and requesting response');
+      sendMessage(JSON.stringify({ type: 'input_audio_buffer.commit' }));
+      sendMessage(JSON.stringify({ type: 'response.create' }));
+    } catch (e) {
+      console.warn('[VoiceWS] Failed to commit/request response:', e);
+    }
+  }, [sendMessage]);
 
   // UCO integration helpers
   const { uco, getMinimalMarkdown } = useUCO();
@@ -142,6 +175,10 @@ const Unmute = () => {
   // Send microphone audio to the server (via useAudioProcessor below)
   const onOpusRecorded = useCallback(
     (opus: Uint8Array) => {
+      if (!sessionReadyRef.current) {
+        // Drop audio frames until session is confirmed ready
+        return;
+      }
       sendMessage(
         JSON.stringify({
           type: "input_audio_buffer.append",
@@ -221,7 +258,16 @@ const Unmute = () => {
     if (lastMessage === null) return;
 
     const data = JSON.parse(lastMessage.data);
-    if (data.type === "response.audio.delta") {
+    if (data.type === 'session.updated') {
+      console.log('[VoiceWS] Received session.updated, enabling audio send');
+      setSessionReady(true);
+      sessionReadyRef.current = true;
+      return;
+    }
+    if (data.type === 'input_audio_buffer.speech_stopped') {
+      // End of utterance detected by server VAD; trigger inference
+      commitAndRequestResponse();
+    } else if (data.type === "response.audio.delta") {
       const opus = base64DecodeOpus(data.delta);
       const ap = audioProcessor.current;
       if (!ap) return;
@@ -262,13 +308,11 @@ const Unmute = () => {
       ]);
     } else {
       const ignoredTypes = [
-        "session.updated",
         "response.created",
         "response.text.delta",
         "response.text.done",
         "response.audio.done",
         "conversation.item.input_audio_transcription.delta",
-        "input_audio_buffer.speech_stopped",
         "input_audio_buffer.speech_started",
         "unmute.interrupted_by_vad",
         "unmute.response.text.delta.ready",
@@ -290,6 +334,8 @@ const Unmute = () => {
 
     setRawChatHistory([]);
     resetUCO(); // Reset UCO formatter for new conversation
+    setSessionReady(false);
+    sessionReadyRef.current = false;
     
     // Build UCO-aware system prompt based on instruction type
     let ucoInstructions;
@@ -312,7 +358,7 @@ const Unmute = () => {
       // For other types, keep original with UCO basics added
       ucoInstructions = unmuteConfig.instructions;
     }
-    
+    console.log('[VoiceWS] Sending session.update');
     sendMessage(
       JSON.stringify({
         type: "session.update",
@@ -359,6 +405,11 @@ const Unmute = () => {
     // Start the UCO readiness checking process
     sendInitialUCOWhenReady();
   }, [unmuteConfig, readyState, sendMessage, resetUCO, formatMessageWithUCO]);
+
+  // Log socket state transitions for debugging
+  useEffect(() => {
+    console.log('[VoiceWS] readyState:', ReadyState[readyState], 'url:', socketUrl);
+  }, [readyState, socketUrl]);
 
   // Send UCO deltas on subsequent UCO state updates during an open session
   useEffect(() => {

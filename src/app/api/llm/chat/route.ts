@@ -119,8 +119,9 @@ export async function POST(request: NextRequest) {
     });
 
     // Connect directly to Groq LLM proxy service
-    // Using internal Docker service name for direct communication
-    const llmUrl = 'http://unmute_llm:8080/v1/chat/completions';
+    // Using internal Docker Swarm service DNS name
+    const llmBase = process.env.KYUTAI_LLM_URL || 'http://unmute_unmute_llm:8080';
+    const llmUrl = `${llmBase.replace(/\/$/, '')}/v1/chat/completions`;
     
     let llmResponse: Response;
     try {
