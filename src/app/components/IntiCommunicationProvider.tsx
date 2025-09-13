@@ -39,7 +39,11 @@ type IntiCommunicationContextType = IntiCommunicationState & IntiCommunicationAc
 
 const IntiCommunicationContext = createContext<IntiCommunicationContextType | undefined>(undefined);
 
-const WEBSOCKET_URL = 'wss://inti.intellipedia.ai/ws';
+// Use Traefik-routed WebSocket endpoint; allow override via env
+const WEBSOCKET_URL = (process.env.NEXT_PUBLIC_WS_URL as string) || 'wss://inti.intellipedia.ai/v1/realtime';
+// External auth API base (Replit). Override via env when published (e.g., https://inti-ai.replit.app)
+const REPLIT_API_BASE = (process.env.NEXT_PUBLIC_REPLIT_API_BASE as string) ||
+  'https://6d3f40b3-1e49-4b09-85e4-36ff422ee88b-00-psvr1owg24vj.janeway.replit.dev';
 
 // Helper function to extract profile image from user data with proper field mapping
 const extractProfileImage = (userData: any): string | null => {
@@ -321,12 +325,13 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
     console.log('[IntiComm] WebSocket URL:', wsUrl.replace(/sessionId=[^&]+/, 'sessionId=[REDACTED]'));
 
     try {
-      const ws = new WebSocket(wsUrl);
+      // Include required subprotocol expected by the backend (FastAPI sets "realtime")
+      const ws = new WebSocket(wsUrl, 'realtime');
       wsRef.current = ws;
 
       ws.onopen = () => {
         console.log('[IntiComm] ✅ WebSocket connected successfully');
-        setState(prev => ({ ...prev, connected: true }));
+        setState(prev => ({ ...prev, connected: true, loading: false }));
         try { ws.send(JSON.stringify({ type: 'auth.resolve' })); } catch {}
       };
 
@@ -412,6 +417,104 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
 
     // ALWAYS connect to WebSocket for real-time features (chat, updates, etc.)
     console.log('[IntiComm] Establishing WebSocket connection for real-time features...');
+
+    // Auth bootstrap via Replit when a session param is present (non-blocking)
+    try {
+      const url = new URL(window.location.href);
+      const sessionFromUrl = url.searchParams.get('session') || url.searchParams.get('sessionId');
+      if (sessionFromUrl) {
+        console.log('[IntiComm] Found session in URL; attempting auth bootstrap via Replit');
+        (async () => {
+          try {
+            const resp = await fetch(`${REPLIT_API_BASE}/api/auth/me`, {
+              method: 'GET',
+              headers: { 'Authorization': `Bearer ${sessionFromUrl}` },
+              mode: 'cors'
+            });
+            if (resp.ok) {
+              const j = await resp.json();
+              const displayName = j?.displayName || j?.display_name || j?.username;
+              if (displayName) {
+                const user: User = {
+                  id: j.id || j.userId || 'authenticated_user',
+                  displayName,
+                  username: j.username || displayName,
+                  email: j.email || null,
+                  profileImage: extractProfileImage(j)
+                };
+                console.log('[IntiComm] Bootstrap auth success; user:', displayName);
+                setState(prev => ({ ...prev, loading: false, authenticated: true, user, error: null }));
+                const authData = { authenticated: true, user, sessionId: sessionFromUrl };
+                try {
+                  localStorage.setItem('inti_auth', JSON.stringify(authData));
+                  sessionStorage.setItem('inti_auth', JSON.stringify(authData));
+                } catch {}
+                try {
+                  url.searchParams.delete('session');
+                  url.searchParams.delete('sessionId');
+                  window.history.replaceState({}, document.title, url.toString());
+                } catch {}
+              }
+            } else {
+              console.warn('[IntiComm] Bootstrap auth failed; status', resp.status);
+            }
+          } catch (e) {
+            console.warn('[IntiComm] Bootstrap auth error:', e);
+          }
+        })();
+      }
+    } catch {}
+
+    // Fallback: if another auth bridge (Replit) has stored auth, reflect it
+    try {
+      const stored = localStorage.getItem('inti_auth') || sessionStorage.getItem('inti_auth');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed?.authenticated && parsed?.user?.displayName && parsed.user.displayName !== 'Replit User') {
+          setState(prev => ({
+            ...prev,
+            loading: false,
+            authenticated: true,
+            user: {
+              id: parsed.user.id || parsed.user.userId || 'authenticated_user',
+              displayName: parsed.user.displayName,
+              username: parsed.user.username || parsed.user.displayName,
+              email: parsed.user.email || null,
+              profileImage: extractProfileImage(parsed.user)
+            },
+            error: null
+          }));
+        }
+      }
+      const onStorage = (e: StorageEvent) => {
+        if (e.key === 'inti_auth') {
+          try {
+            const v = e.newValue ? JSON.parse(e.newValue) : null;
+            if (v?.authenticated && v?.user) {
+              setState(prev => ({ ...prev, authenticated: true, user: {
+                id: v.user.id || v.user.userId || 'authenticated_user',
+                displayName: v.user.displayName,
+                username: v.user.username || v.user.displayName,
+                email: v.user.email || null,
+                profileImage: extractProfileImage(v.user)
+              }, loading: false, error: null }));
+            } else {
+              setState(prev => ({ ...prev, authenticated: false, user: null }));
+            }
+          } catch {}
+        }
+      };
+      window.addEventListener('storage', onStorage);
+      (window as any).__intiOnStorage = onStorage;
+    } catch {}
+
+    // Safety valve: never block UI indefinitely; clear loading after a short timeout
+    if (!authCheckTimeoutRef.current) {
+      authCheckTimeoutRef.current = setTimeout(() => {
+        setState(prev => ({ ...prev, loading: false }));
+        authCheckTimeoutRef.current = null;
+      }, 4000);
+    }
     connect();
 
     // Cleanup on unmount
@@ -423,6 +526,10 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
       if (wsRef.current) {
         wsRef.current.close();
       }
+      try {
+        const onStorage = (window as any).__intiOnStorage;
+        if (onStorage) window.removeEventListener('storage', onStorage);
+      } catch {}
     };
   }, []); // Empty deps to run only on mount
 

@@ -21,7 +21,9 @@ interface TopicMessage {
   timestamp: number;
 }
 
-const WEBSOCKET_URL_BASE = "wss://6d3f40b3-1e49-4b09-85e4-36ff422ee88b-00-psvr1owg24vj.janeway.replit.dev/api/inti-ws";
+// Replit auth/communication WebSocket. Allow override via env.
+const WEBSOCKET_URL_BASE = (process.env.NEXT_PUBLIC_REPLIT_WS_URL as string) ||
+  "wss://6d3f40b3-1e49-4b09-85e4-36ff422ee88b-00-psvr1owg24vj.janeway.replit.dev/api/inti-ws";
 
 // This hook now manages both communication AND authentication state
 export const useIntiCommunication = () => {
@@ -144,12 +146,14 @@ export const useIntiCommunication = () => {
     }
 
     console.log(`[IntiComm] Initializing WebSocket connection to: ${websocketUrl.replace(/sessionId=[^&]+/, 'sessionId=[REDACTED]')}`);
-    ws.current = new WebSocket(websocketUrl);
+    // Include subprotocol used by backend when applicable
+    ws.current = new WebSocket(websocketUrl, 'realtime');
 
     ws.current.onopen = () => {
       console.log('[IntiComm] WebSocket connection established.');
       setIsConnected(true);
-      // Authentication happens via sessionId in the connection URL
+      // Request auth resolution explicitly to avoid relying on URL session
+      try { ws.current?.send(JSON.stringify({ type: 'auth.resolve' })); } catch {}
     };
 
     ws.current.onmessage = (event) => {
