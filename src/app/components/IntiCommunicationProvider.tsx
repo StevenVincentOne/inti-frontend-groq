@@ -61,56 +61,8 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
   const authCheckTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const authStateRef = useRef<boolean>(false);
 
-  // Derive the HTTP base for Replit from the WS URL
-  const getReplitHttpBase = () => {
-    try {
-      const u = new URL(WEBSOCKET_URL);
-      u.protocol = (u.protocol === 'wss:') ? 'https:' : 'http:';
-      u.pathname = '';
-      u.search = '';
-      u.hash = '';
-      return u.toString().replace(/\/$/, '');
-    } catch {
-      // Fallback: replace wss/ws with https/http and strip path
-      return WEBSOCKET_URL
-        .replace(/^wss:/, 'https:')
-        .replace(/^ws:/, 'http:')
-        .replace(/\/api\/inti-ws.*$/, '');
-    }
-  };
-
-  // Preflight cookie-based whoami to set initial auth state
-  const preflightWhoami = useCallback(async () => {
-    const whoamiUrl = `${getReplitHttpBase()}/api/session/whoami`;
-    try {
-      const res = await fetch(whoamiUrl, { credentials: 'include', mode: 'cors' });
-      if (!res.ok) {
-        console.log('[IntiComm] whoami not authenticated:', res.status);
-        return false;
-      }
-      const body = await res.json();
-      const u = body?.user;
-      if (u && (u.displayName || u.display_name)) {
-        const user: User = {
-          id: u.id || 'authenticated_user',
-          displayName: u.displayName || u.display_name,
-          username: u.username || (u.displayName || u.display_name) || null,
-          email: u.email || null,
-          profileImage: extractProfileImage(u)
-        };
-        const authData = { user, authenticated: true };
-        localStorage.setItem('inti_auth', JSON.stringify(authData));
-        sessionStorage.setItem('inti_auth', JSON.stringify(authData));
-        setState(prev => ({ ...prev, loading: false, user, authenticated: true, error: null }));
-        authStateRef.current = true;
-        console.log('[IntiComm] whoami authenticated:', user.displayName);
-        return true;
-      }
-    } catch (e) {
-      console.log('[IntiComm] whoami error:', e);
-    }
-    return false;
-  }, []);
+  // Database-canonical authentication via WebSocket only
+  // Removed whoami preflight call to eliminate 404 errors
 
   // Handle incoming WebSocket messages
   const handleMessage = useCallback((event: MessageEvent) => {
@@ -143,9 +95,7 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
             console.log('[IntiComm] ✅ Successfully authenticated user:', user.displayName);
             console.log('[IntiComm] Profile image extracted:', user.profileImage);
             
-            const authData = { user, authenticated: true };
-            localStorage.setItem('inti_auth', JSON.stringify(authData));
-            sessionStorage.setItem('inti_auth', JSON.stringify(authData));
+            // Database-canonical: No localStorage usage
 
             setState(prev => ({
               ...prev,
@@ -191,9 +141,7 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
               profileImage: extractProfileImage(candidate)
             };
             console.log('[IntiComm] ✅ Authenticated user (userState):', user.displayName);
-            const authData = { user, authenticated: true };
-            localStorage.setItem('inti_auth', JSON.stringify(authData));
-            sessionStorage.setItem('inti_auth', JSON.stringify(authData));
+            // Database-canonical: No localStorage usage
 
             setState(prev => ({
               ...prev,
@@ -227,11 +175,7 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
 
         case 'auth.logout_success':
           console.log('[IntiComm] ✅ Logout successful:', data);
-          // Clear all auth data
-          localStorage.removeItem('inti_auth');
-          sessionStorage.removeItem('inti_auth');
-          localStorage.removeItem('sessionId');
-          sessionStorage.removeItem('sessionId');
+          // Database-canonical: Auth cleared via WebSocket only
           
           setState(prev => ({
             ...prev,
@@ -248,11 +192,7 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
 
         case 'auth.user_logged_out':
           console.log('[IntiComm] 🚪 User logged out from another client:', data);
-          // Clear all auth data
-          localStorage.removeItem('inti_auth');
-          sessionStorage.removeItem('inti_auth');
-          localStorage.removeItem('sessionId');
-          sessionStorage.removeItem('sessionId');
+          // Database-canonical: Auth cleared via WebSocket only
           
           setState(prev => ({
             ...prev,
@@ -271,11 +211,7 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
 
         case 'auth.logout_error':
           console.error('[IntiComm] ❌ Logout error:', data);
-          // Still clear local state even on error
-          localStorage.removeItem('inti_auth');
-          sessionStorage.removeItem('inti_auth');
-          localStorage.removeItem('sessionId');
-          sessionStorage.removeItem('sessionId');
+          // Database-canonical: Auth cleared via WebSocket only
           
           setState(prev => ({
             ...prev,
@@ -307,9 +243,7 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
             console.log('[IntiComm] ✅ Successfully authenticated user from auth.response:', user.displayName);
             console.log('[IntiComm] Profile image extracted:', user.profileImage);
             
-            const authData = { user, authenticated: true };
-            localStorage.setItem('inti_auth', JSON.stringify(authData));
-            sessionStorage.setItem('inti_auth', JSON.stringify(authData));
+            // Database-canonical: No localStorage usage
 
             setState(prev => ({
               ...prev,
@@ -438,49 +372,8 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
     }
   }, [handleMessage]);
 
-  // Check for stored authentication first
-  const checkStoredAuth = useCallback(() => {
-    console.log('[IntiComm] Checking for stored authentication...');
-    
-    const storedAuth = localStorage.getItem('inti_auth') || 
-                      sessionStorage.getItem('inti_auth');
-    
-    if (storedAuth) {
-      try {
-        const parsed = JSON.parse(storedAuth);
-        if (parsed.user && parsed.authenticated && parsed.user.displayName && parsed.user.displayName !== 'Replit User') {
-          console.log('[IntiComm] Found valid stored authentication:', parsed.user.displayName);
-          // Also extract profile image from stored auth in case it was saved with the old field name
-          if (parsed.user && !parsed.user.profileImage && (parsed.user.profile_image_url || parsed.user.profile_image)) {
-            parsed.user.profileImage = extractProfileImage(parsed.user);
-            console.log('[IntiComm] Updated stored auth with extracted profile image:', parsed.user.profileImage);
-            // Re-save the updated auth data
-            localStorage.setItem('inti_auth', JSON.stringify(parsed));
-            sessionStorage.setItem('inti_auth', JSON.stringify(parsed));
-          }
-          setState(prev => ({
-            ...prev,
-            loading: false,
-            user: parsed.user,
-            authenticated: true,
-            error: null
-          }));
-          authStateRef.current = true;
-          return true;
-        } else {
-          console.log('[IntiComm] Stored auth is invalid or contains bypass user, clearing...');
-          localStorage.removeItem('inti_auth');
-          sessionStorage.removeItem('inti_auth');
-        }
-      } catch {
-        console.log('[IntiComm] Invalid stored auth data, clearing...');
-        localStorage.removeItem('inti_auth');
-        sessionStorage.removeItem('inti_auth');
-      }
-    }
-    
-    return false;
-  }, []);
+  // Database-canonical: Removed stored auth checking
+  // Authentication state comes only from WebSocket/database
 
   // Send voice transcription
   const sendVoiceTranscription = useCallback((transcription: string, audioData?: unknown) => {
@@ -503,9 +396,7 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
 
   // Refresh auth function  
   const refreshAuth = useCallback(() => {
-    // Clear stored auth and reconnect
-    localStorage.removeItem('inti_auth');
-    sessionStorage.removeItem('inti_auth');
+    // Database-canonical: Request fresh auth via WebSocket
     setState(prev => ({ ...prev, loading: true, user: null, authenticated: false }));
     
     if (wsRef.current) {
@@ -517,14 +408,7 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
   // Initialize connection on mount - FIXED: Always connect for real-time features
   useEffect(() => {
     console.log('[IntiComm] Provider mounted, initializing...');
-    (async () => {
-      // Prefer canonical cookie-based resolution
-      const ok = await preflightWhoami();
-      if (!ok) {
-        // Fallback to stored auth to minimize user friction
-        checkStoredAuth();
-      }
-    })();
+    // Database-canonical: Skip preflight auth, rely on WebSocket only
 
     // ALWAYS connect to WebSocket for real-time features (chat, updates, etc.)
     console.log('[IntiComm] Establishing WebSocket connection for real-time features...');

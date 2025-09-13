@@ -101,7 +101,14 @@ const Unmute = () => {
     checkHealth();
   }, [backendServerUrl]);
 
+  // Always negotiate the required Realtime subprotocol in production to avoid
+  // handshake failures caused by local overrides.
   const realtimeProtocols = (() => {
+    const isProd = typeof window !== 'undefined' && /(^|\.)intellipedia\.ai$/i.test(window.location.hostname);
+    if (isProd) {
+      return ['realtime'];
+    }
+    // In non-prod, allow an explicit override via localStorage for debugging
     try {
       if (typeof window !== 'undefined') {
         const override = localStorage.getItem('INTI_WS_SUBPROTOCOL');
