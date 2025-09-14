@@ -213,10 +213,8 @@ export function useUCO(options: UCOHookOptions = {}) {
   useEffect(() => {
     const connectWebSocket = () => {
       try {
-        const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 
-                      (typeof window !== 'undefined' && window.location.hostname === 'localhost' 
-                        ? 'ws://localhost:5000/api/inti-ws'
-                        : 'wss://6d3f40b3-1e49-4b09-85e4-36ff422ee88b-00-psvr1owg24vj.janeway.replit.dev/api/inti-ws');
+        // Use primary backend (DigitalOcean) for UCO WebSocket, matching IntiCommunicationProvider
+        const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'wss://inti.intellipedia.ai/v1/realtime';
         // Pragmatic fallback: if a canonical session is present in URL, include it in WS query
         let url = `${wsUrl}?clientType=PWA`;
         try {
@@ -226,7 +224,8 @@ export function useUCO(options: UCOHookOptions = {}) {
             url += `&sessionId=${encodeURIComponent(sessionFromUrl)}`;
           }
         } catch {}
-        const ws = new WebSocket(url);
+        // Use same subprotocol as main WebSocket connection
+        const ws = new WebSocket(url, 'realtime');
         
         ws.onopen = () => {
           console.log('[UCO] Connected');
