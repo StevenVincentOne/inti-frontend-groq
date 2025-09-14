@@ -213,8 +213,10 @@ export function useUCO(options: UCOHookOptions = {}) {
   useEffect(() => {
     const connectWebSocket = () => {
       try {
-        // Use primary backend (DigitalOcean) for UCO WebSocket, matching IntiCommunicationProvider
-        const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'wss://inti.intellipedia.ai/v1/realtime';
+        const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 
+                      (typeof window !== 'undefined' && window.location.hostname === 'localhost' 
+                        ? 'ws://localhost:5000/api/inti-ws'
+                        : 'wss://6d3f40b3-1e49-4b09-85e4-36ff422ee88b-00-psvr1owg24vj.janeway.replit.dev/api/inti-ws');
         // Pragmatic fallback: if a canonical session is present in URL, include it in WS query
         let url = `${wsUrl}?clientType=PWA`;
         try {
@@ -224,11 +226,10 @@ export function useUCO(options: UCOHookOptions = {}) {
             url += `&sessionId=${encodeURIComponent(sessionFromUrl)}`;
           }
         } catch {}
-        // Use same subprotocol as main WebSocket connection
-        const ws = new WebSocket(url, 'realtime');
+        const ws = new WebSocket(url);
         
         ws.onopen = () => {
-          console.log('[UCO] Connected');
+          console.log('[UCO-DB] Connected');
           setConnected(true);
           setError(null);
           requestSentRef.current = false;
@@ -241,7 +242,7 @@ export function useUCO(options: UCOHookOptions = {}) {
             const message = JSON.parse(event.data);
             // Only log non-ping messages
             if (message.type !== 'ping' && message.type !== 'pong') {
-              console.log('[UCO] Message received:', message.type, new Date().toISOString());
+              console.log('[UCO-DB] Message received:', message.type, new Date().toISOString());
             }
             handleWebSocketMessage(message);
           } catch (err) {
@@ -255,7 +256,7 @@ export function useUCO(options: UCOHookOptions = {}) {
         };
         
         ws.onclose = () => {
-          console.log('[UCO] Disconnected');
+          console.log('[UCO-DB] Disconnected');
           setConnected(false);
           setAuthenticated(false);
           requestSentRef.current = false;
@@ -327,7 +328,7 @@ export function useUCO(options: UCOHookOptions = {}) {
         // Debounce rapid updates
         const now = Date.now();
         if (now - lastUpdateRef.current < 100) {
-          console.log('[UCO] Debouncing rapid update (within 100ms)');
+          console.log('[UCO-DB] Debouncing rapid update (within 100ms)');
           
           // Clear existing debounce timer
           if (updateDebounceRef.current) {
@@ -343,7 +344,7 @@ export function useUCO(options: UCOHookOptions = {}) {
         }
         lastUpdateRef.current = now;
         
-        console.log('[UCO] Processing state update at', new Date().toISOString());
+        console.log('[UCO-DB] Processing state update at', new Date().toISOString());
         // Extract and sanitize raw data
         const rawUser = message.data?.components?.user?.data || {};
         const rawTopic = message.data?.components?.topic?.data || {};
@@ -396,7 +397,7 @@ export function useUCO(options: UCOHookOptions = {}) {
           conversation: Object.keys(rawConversation).filter(k => rawConversation[k] !== null && rawConversation[k] !== undefined)
         };
         
-        console.log('[UCO] State received:', {
+        console.log('[UCO-DB] State received:', {
           totalFields,
           factsCount: v15Data.data.facts.length,
           markdownLength: v15Data.views.minimal.length,
@@ -410,7 +411,7 @@ export function useUCO(options: UCOHookOptions = {}) {
         
         // Log sample data for debugging
         if (rawUser.id) {
-          console.log('[UCO] User data sample:', {
+          console.log('[UCO-DB] User data sample:', {
             id: rawUser.id,
             name: rawUser.displayName || rawUser.display_name,
             bio: rawUser.bio,
@@ -420,7 +421,7 @@ export function useUCO(options: UCOHookOptions = {}) {
         }
         
         if (rawTopic.uuid || rawTopic.topic_uuid || rawTopic.title) {
-          console.log('[UCO] Topic data sample:', {
+          console.log('[UCO-DB] Topic data sample:', {
             uuid: rawTopic.uuid || rawTopic.topic_uuid,
             title: rawTopic.title || rawTopic.title_final,
             status: rawTopic.status || rawTopic.stage,
@@ -431,47 +432,47 @@ export function useUCO(options: UCOHookOptions = {}) {
         setUCO(v15Data);
         currentUCORef.current = v15Data; // Update ref immediately for field updates
         setLoading(false);
-        console.log('[UCO] State set successfully - should be available for field updates');
+        console.log('[UCO-DB] State set successfully - should be available for field updates');
         if (onUpdate) onUpdate(v15Data);
         break;
         
       case 'uco.subscription_confirmed':
       case 'uco.subscribed':
-        console.log('[UCO] Subscription confirmed by backend');
+        console.log('[UCO-DB] Subscription confirmed by backend');
         subscribedRef.current = true;
         break;
         
       case 'uco.conversation_added':
         // Don't request full state, backend should send update
-        console.log('[UCO] Conversation added, waiting for update');
+        console.log('[UCO-DB] Conversation added, waiting for update');
         break;
         
       case 'uco.field_update':
         // Handle partial field updates from backend
-        console.log('[UCO] Field update received:', message.component, message.updates);
-        console.log('[UCO] React state UCO:', uco ? 'EXISTS' : 'NULL');
-        console.log('[UCO] Ref UCO state:', currentUCORef.current ? 'EXISTS' : 'NULL');
-        console.log('[UCO] Message structure:', { type: message.type, component: message.component, hasUpdates: !!message.updates });
+        console.log('[UCO-DB] Field update received:', message.component, message.updates);
+        console.log('[UCO-DB] React state UCO:', uco ? 'EXISTS' : 'NULL');
+        console.log('[UCO-DB] Ref UCO state:', currentUCORef.current ? 'EXISTS' : 'NULL');
+        console.log('[UCO-DB] Message structure:', { type: message.type, component: message.component, hasUpdates: !!message.updates });
         
         // Use ref for immediate access, fallback to state
         const currentUCO = currentUCORef.current || uco;
         
         // If neither ref nor state has UCO, request initial state and try again
         if (!currentUCO && message.component && message.updates) {
-          console.log('[UCO] No UCO state available, requesting initial state and retrying field update');
+          console.log('[UCO-DB] No UCO state available, requesting initial state and retrying field update');
           requestInitialState();
           
           // Retry the field update after a short delay to allow state to initialize
           setTimeout(() => {
-            console.log('[UCO] Retrying field update after state initialization');
+            console.log('[UCO-DB] Retrying field update after state initialization');
             handleWebSocketMessage(message);
           }, 100);
           return;
         }
         
         if (currentUCO && message.component && message.updates) {
-          console.log('[UCO] Processing field update for component:', message.component);
-          console.log('[UCO] Update data:', message.updates);
+          console.log('[UCO-DB] Processing field update for component:', message.component);
+          console.log('[UCO-DB] Update data:', message.updates);
           
           // Create a proper deep copy to ensure React detects state changes
           const updatedUCO = {
@@ -516,9 +517,9 @@ export function useUCO(options: UCOHookOptions = {}) {
           // Update facts if needed
           updatedUCO.data.facts = extractFacts(updatedUCO.data.components);
           
-          console.log('[UCO] Applied field update to', message.component);
-          console.log('[UCO] Updated topic component:', updatedUCO.data.components.topic);
-          console.log('[UCO] Topic loaded status should be:', !!updatedUCO.data.components.topic.loaded || !!updatedUCO.data.components.topic.uuid);
+          console.log('[UCO-DB] Applied field update to', message.component);
+          console.log('[UCO-DB] Updated topic component:', updatedUCO.data.components.topic);
+          console.log('[UCO-DB] Topic loaded status should be:', !!updatedUCO.data.components.topic.loaded || !!updatedUCO.data.components.topic.uuid);
           
           setUCO(updatedUCO);
           currentUCORef.current = updatedUCO; // Update ref immediately for subsequent field updates
@@ -541,7 +542,7 @@ export function useUCO(options: UCOHookOptions = {}) {
     
     const sessionId = getSessionId();
     const timestamp = new Date().toISOString();
-    console.log('[UCO] Requesting initial state at', timestamp);
+    console.log('[UCO-DB] Requesting initial state at', timestamp);
     wsRef.current.send(JSON.stringify({
       type: 'uco.get_state',
       // Session id optional; server resolves via cookie; include only if present
@@ -554,12 +555,12 @@ export function useUCO(options: UCOHookOptions = {}) {
   const subscribeToUpdates = useCallback(() => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     if (subscribedRef.current) {
-      console.log('[UCO] Already subscribed, skipping');
+      console.log('[UCO-DB] Already subscribed, skipping');
       return;
     }
     
     const sessionId = getSessionId();
-    console.log('[UCO] Subscribing to updates');
+    console.log('[UCO-DB] Subscribing to updates');
     wsRef.current.send(JSON.stringify({
       type: 'uco.subscribe',
       ...(sessionId ? { sessionId } : {}),
@@ -572,7 +573,7 @@ export function useUCO(options: UCOHookOptions = {}) {
   // Auto-sync (disabled by default for event-driven updates)
   useEffect(() => {
     if (autoSync && authenticated && wsRef.current) {
-      console.log('[UCO] Auto-sync enabled with interval:', syncInterval);
+      console.log('[UCO-DB] Auto-sync enabled with interval:', syncInterval);
       syncTimerRef.current = setInterval(() => {
         if (wsRef.current?.readyState === WebSocket.OPEN) {
           requestInitialState();
@@ -591,7 +592,7 @@ export function useUCO(options: UCOHookOptions = {}) {
   // Public methods
   const refresh = useCallback(() => {
     if (authenticated) {
-      console.log('[UCO] Manual refresh requested');
+      console.log('[UCO-DB] Manual refresh requested');
       requestInitialState();
     }
   }, [authenticated, requestInitialState]);

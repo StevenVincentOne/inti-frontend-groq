@@ -84,7 +84,7 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
         case 'connection.established': {
           const establishedAuth = data?.authenticated ?? message.authenticated;
           const establishedUser = data?.user ?? message.user;
-          console.log('[IntiComm] ✅ Connection established:', { authenticated: establishedAuth, user: establishedUser });
+          console.log('[IntiComm-Voice] ✅ Connection established:', { authenticated: establishedAuth, user: establishedUser });
           
           // Check if we have authentication info  
           if (establishedAuth && establishedUser && establishedUser.displayName && establishedUser.displayName !== 'Replit User') {
@@ -96,8 +96,8 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
               profileImage: extractProfileImage(establishedUser)
             };
 
-            console.log('[IntiComm] ✅ Successfully authenticated user:', user.displayName);
-            console.log('[IntiComm] Profile image extracted:', user.profileImage);
+            console.log('[IntiComm-Voice] ✅ Successfully authenticated user:', user.displayName);
+            console.log('[IntiComm-Voice] Profile image extracted:', user.profileImage);
             
             // Database-canonical: No localStorage usage
 
@@ -133,7 +133,7 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
           const payload = data ?? message.data;
           const candidate = payload?.user ?? payload;
           const authFlag = payload?.authenticated;
-          console.log('[IntiComm] 👤 User state received:', payload);
+          console.log('[IntiComm-Voice] 👤 User state received:', payload);
 
           const displayName = candidate?.displayName || candidate?.display_name;
           if (displayName && displayName !== 'Replit User') {
@@ -144,7 +144,7 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
               email: candidate.email || null,
               profileImage: extractProfileImage(candidate)
             };
-            console.log('[IntiComm] ✅ Authenticated user (userState):', user.displayName);
+            console.log('[IntiComm-Voice] ✅ Authenticated user (userState):', user.displayName);
             // Database-canonical: No localStorage usage
 
             setState(prev => ({
@@ -162,11 +162,11 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
             }
           } else if (authFlag === false) {
             // Explicit unauthenticated
-            console.log('[IntiComm] User state indicates unauthenticated');
+            console.log('[IntiComm-Voice] User state indicates unauthenticated');
             setState(prev => ({ ...prev, loading: false, user: null, authenticated: false, error: null }));
           } else {
             // Ignore ambiguous updates to avoid overriding a valid authenticated state
-            console.log('[IntiComm] Ignoring ambiguous userState (no displayName/auth flag)');
+            console.log('[IntiComm-Voice] Ignoring ambiguous userState (no displayName/auth flag)');
           }
           break; }
 
@@ -178,7 +178,7 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
           break;
 
         case 'auth.logout_success':
-          console.log('[IntiComm] ✅ Logout successful:', data);
+          console.log('[IntiComm-Voice] ✅ Logout successful:', data);
           // Database-canonical: Auth cleared via WebSocket only
           
           setState(prev => ({
@@ -195,7 +195,7 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
           break;
 
         case 'auth.user_logged_out':
-          console.log('[IntiComm] 🚪 User logged out from another client:', data);
+          console.log('[IntiComm-Voice] 🚪 User logged out from another client:', data);
           // Database-canonical: Auth cleared via WebSocket only
           
           setState(prev => ({
@@ -234,7 +234,7 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
         case 'auth.response': {
           const respAuth = (data?.authenticated ?? message.authenticated) as boolean | undefined;
           const respUser = (data?.user ?? message.user) as any;
-          console.log('[IntiComm] 🔐 Auth response received:', { authenticated: respAuth, user: respUser });
+          console.log('[IntiComm-Voice] 🔐 Auth response received:', { authenticated: respAuth, user: respUser });
           if (respAuth && respUser && respUser.displayName && respUser.displayName !== 'Replit User') {
             const user: User = {
               id: respUser.id || respUser.userId || 'authenticated_user',
@@ -244,8 +244,8 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
               profileImage: extractProfileImage(respUser)
             };
 
-            console.log('[IntiComm] ✅ Successfully authenticated user from auth.response:', user.displayName);
-            console.log('[IntiComm] Profile image extracted:', user.profileImage);
+            console.log('[IntiComm-Voice] ✅ Successfully authenticated user from auth.response:', user.displayName);
+            console.log('[IntiComm-Voice] Profile image extracted:', user.profileImage);
             
             // Database-canonical: No localStorage usage
 
@@ -262,7 +262,7 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
               authCheckTimeoutRef.current = null;
             }
           } else {
-            console.log('[IntiComm] Auth response indicates user not authenticated or invalid data');
+            console.log('[IntiComm-Voice] Auth response indicates user not authenticated or invalid data');
             // Be conservative: only downgrade if we are not already authenticated
             setState(prev => {
               if (authStateRef.current) {
@@ -300,7 +300,7 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
         timestamp: Date.now() 
       };
       wsRef.current.send(JSON.stringify(message));
-      console.log('[IntiComm] Sent message:', message);
+      console.log('[IntiComm-Voice] Sent message:', message);
     } else {
       console.warn('[IntiComm] Cannot send message - WebSocket not connected:', { type, data });
     }
@@ -309,11 +309,11 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
   // Connect to WebSocket (prefer server-side resolution; include sessionId only if explicitly available)
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      console.log('[IntiComm] Already connected');
+      console.log('[IntiComm-Voice] Already connected');
       return;
     }
 
-    console.log('[IntiComm] Connecting to WebSocket...');
+    console.log('[IntiComm-Voice] Connecting to WebSocket...');
 
     // Resolve session only if explicitly available (URL param). Avoid synthesizing.
     const urlParams = new URLSearchParams(window.location.search);
@@ -322,7 +322,7 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
       ? `${WEBSOCKET_URL}?clientType=PWA&sessionId=${encodeURIComponent(sessionFromUrl)}`
       : `${WEBSOCKET_URL}?clientType=PWA`;
 
-    console.log('[IntiComm] WebSocket URL:', wsUrl.replace(/sessionId=[^&]+/, 'sessionId=[REDACTED]'));
+    console.log('[IntiComm-Voice] WebSocket URL:', wsUrl.replace(/sessionId=[^&]+/, 'sessionId=[REDACTED]'));
 
     try {
       // Include required subprotocol expected by the backend (FastAPI sets "realtime")
@@ -330,7 +330,7 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
       wsRef.current = ws;
 
       ws.onopen = () => {
-        console.log('[IntiComm] ✅ WebSocket connected successfully');
+        console.log('[IntiComm-Voice] ✅ WebSocket connected successfully');
         setState(prev => ({ ...prev, connected: true, loading: false }));
         try { ws.send(JSON.stringify({ type: 'auth.resolve' })); } catch {}
       };
@@ -338,7 +338,7 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
       ws.onmessage = handleMessage;
 
       ws.onclose = (event) => {
-        console.log('[IntiComm] WebSocket closed:', event.code, event.reason);
+        console.log('[IntiComm-Voice] WebSocket closed:', event.code, event.reason);
         setState(prev => ({
           ...prev,
           connected: false,
@@ -350,7 +350,7 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
         // Attempt to reconnect after 5 seconds if not intentionally closed
         if (event.code !== 1000) {
           setTimeout(() => {
-            console.log('[IntiComm] Attempting to reconnect...');
+            console.log('[IntiComm-Voice] Attempting to reconnect...');
             connect();
           }, 5000);
         }
@@ -388,14 +388,14 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
   // Logout function
   const logout = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      console.log('[IntiComm] Sending logout request');
+      console.log('[IntiComm-Voice] Sending logout request');
       wsRef.current.send(JSON.stringify({
         type: 'auth.logout',
         clientType: 'PWA',
         timestamp: Date.now()
       }));
     } else {
-      console.log('[IntiComm] No active WebSocket connection for logout');
+      console.log('[IntiComm-Voice] No active WebSocket connection for logout');
     }
   }, []);
 
@@ -412,18 +412,18 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
 
   // Initialize connection on mount - FIXED: Always connect for real-time features
   useEffect(() => {
-    console.log('[IntiComm] Provider mounted, initializing...');
+    console.log('[IntiComm-Voice] Provider mounted, initializing...');
     // Database-canonical: Skip preflight auth, rely on WebSocket only
 
     // ALWAYS connect to WebSocket for real-time features (chat, updates, etc.)
-    console.log('[IntiComm] Establishing WebSocket connection for real-time features...');
+    console.log('[IntiComm-Voice] Establishing WebSocket connection for real-time features...');
 
     // Auth bootstrap via Replit when a session param is present (non-blocking)
     try {
       const url = new URL(window.location.href);
       const sessionFromUrl = url.searchParams.get('session') || url.searchParams.get('sessionId');
       if (sessionFromUrl) {
-        console.log('[IntiComm] Found session in URL; attempting auth bootstrap via Replit');
+        console.log('[IntiComm-Voice] Found session in URL; attempting auth bootstrap via Replit');
         (async () => {
           try {
             const resp = await fetch(`${REPLIT_API_BASE}/api/auth/me`, {
@@ -442,7 +442,7 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
                   email: j.email || null,
                   profileImage: extractProfileImage(j)
                 };
-                console.log('[IntiComm] Bootstrap auth success; user:', displayName);
+                console.log('[IntiComm-Voice] Bootstrap auth success; user:', displayName);
                 setState(prev => ({ ...prev, loading: false, authenticated: true, user, error: null }));
                 const authData = { authenticated: true, user, sessionId: sessionFromUrl };
                 try {
@@ -519,7 +519,7 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
 
     // Cleanup on unmount
     return () => {
-      console.log('[IntiComm] Provider unmounting, cleaning up...');
+      console.log('[IntiComm-Voice] Provider unmounting, cleaning up...');
       if (authCheckTimeoutRef.current) {
         clearTimeout(authCheckTimeoutRef.current);
       }

@@ -44,7 +44,7 @@ export const useIntiCommunication = () => {
     const urlParams = new URLSearchParams(window.location.search);
     const urlSessionId = urlParams.get('session');
     if (urlSessionId) {
-      console.log('[IntiComm] Found session in URL parameter:', urlSessionId.substring(0, 8) + '...');
+      console.log('[IntiComm-Auth] Found session in URL parameter:', urlSessionId.substring(0, 8) + '...');
       return urlSessionId;
     }
     
@@ -54,18 +54,18 @@ export const useIntiCommunication = () => {
       try {
         const parsed = JSON.parse(storedAuth);
         if (parsed.authenticated && parsed.user) {
-          console.log('[IntiComm] Found stored auth data for user:', parsed.user.displayName || parsed.user.username);
+          console.log('[IntiComm-Auth] Found stored auth data for user:', parsed.user.displayName || parsed.user.username);
           
           // FIXED: Extract actual session ID from stored auth
           if (parsed.sessionId) {
-            console.log('[IntiComm] Using stored session ID for WebSocket authentication');
+            console.log('[IntiComm-Auth] Using stored session ID for WebSocket authentication');
             return parsed.sessionId;
           }
           
           
 }
       } catch {
-        console.log('[IntiComm] Invalid stored auth data, clearing...');
+        console.log('[IntiComm-Auth] Invalid stored auth data, clearing...');
         localStorage.removeItem('inti_auth');
         sessionStorage.removeItem('inti_auth');
       }
@@ -77,7 +77,7 @@ export const useIntiCommunication = () => {
                            document.cookie.split(';').find(c => c.trim().startsWith('sessionId='))?.split('=')[1];
     
     if (legacySessionId) {
-      console.log('[IntiComm] Found legacy session:', legacySessionId.substring(0, 8) + '...');
+      console.log('[IntiComm-Auth] Found legacy session:', legacySessionId.substring(0, 8) + '...');
       return legacySessionId;
     }
     
@@ -92,7 +92,7 @@ export const useIntiCommunication = () => {
       try {
         const parsed = JSON.parse(storedAuth);
         if (parsed.authenticated && parsed.user && parsed.user.displayName && parsed.user.displayName !== 'Replit User') {
-          console.log('[IntiComm] Found valid stored authentication:', parsed.user.displayName);
+          console.log('[IntiComm-Auth] Found valid stored authentication:', parsed.user.displayName);
           setAuthState({
             loading: false,
             authenticated: true,
@@ -120,7 +120,7 @@ export const useIntiCommunication = () => {
         timestamp: Date.now()
       };
       const messageStr = JSON.stringify(message);
-      console.log('[IntiComm] Sending message:', messageStr);
+      console.log('[IntiComm-Auth] Sending message:', messageStr);
       ws.current.send(messageStr);
     } else {
       console.error('[IntiComm] Cannot send message - WebSocket not connected:', { type, data });
@@ -129,7 +129,7 @@ export const useIntiCommunication = () => {
 
   const connect = useCallback(() => {
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-      console.log('[IntiComm] WebSocket already open.');
+      console.log('[IntiComm-Auth] WebSocket already open.');
       return;
     }
 
@@ -141,7 +141,7 @@ export const useIntiCommunication = () => {
       console.log(`[IntiComm] Authenticating WebSocket with sessionId: ${sessionInfo.substring(0, 8)}...`);
       websocketUrl = `${WEBSOCKET_URL_BASE}?clientType=PWA&sessionId=${sessionInfo}`;
     } else {
-      console.log('[IntiComm] No session ID found. Connecting WebSocket without authentication.');
+      console.log('[IntiComm-Auth] No session ID found. Connecting WebSocket without authentication.');
       websocketUrl = `${WEBSOCKET_URL_BASE}?clientType=PWA`;
     }
 
@@ -150,7 +150,7 @@ export const useIntiCommunication = () => {
     ws.current = new WebSocket(websocketUrl, 'realtime');
 
     ws.current.onopen = () => {
-      console.log('[IntiComm] WebSocket connection established.');
+      console.log('[IntiComm-Auth] WebSocket connection established.');
       setIsConnected(true);
       // Request auth resolution explicitly to avoid relying on URL session
       try { ws.current?.send(JSON.stringify({ type: 'auth.resolve' })); } catch {}
@@ -158,17 +158,17 @@ export const useIntiCommunication = () => {
 
     ws.current.onmessage = (event) => {
       const message = JSON.parse(event.data);
-      console.log('[IntiComm] Received message:', message);
+      console.log('[IntiComm-Auth] Received message:', message);
 
       // Handle auth.response message
       if (message.type === 'auth.response') {
-        console.log('[IntiComm] 🔐 Auth response received:', message);
+        console.log('[IntiComm-Auth] 🔐 Auth response received:', message);
         if (message.success && message.authenticated) {
           setIsConnected(true);
           setClientId(message.clientId || message.data?.clientId || 'authenticated');
           
           if (message.user) {
-            console.log('[IntiComm] ✅ Successfully authenticated user:', message.user.displayName || message.user.username);
+            console.log('[IntiComm-Auth] ✅ Successfully authenticated user:', message.user.displayName || message.user.username);
             // Store authenticated user
             setAuthState({
               loading: false,
@@ -180,14 +180,14 @@ export const useIntiCommunication = () => {
             sessionStorage.setItem('inti_auth', JSON.stringify(authData));
           }
         } else {
-          console.log('[IntiComm] ❌ Authentication failed:', message.message || 'Unknown error');
+          console.log('[IntiComm-Auth] ❌ Authentication failed:', message.message || 'Unknown error');
         }
         return;
       }
       
       // Handle "connected" message type (simple connection acknowledgment)
       if (message.type === 'connected') {
-        console.log('[IntiComm] ✅ Connection established:', message);
+        console.log('[IntiComm-Auth] ✅ Connection established:', message);
         setIsConnected(true);
         if (message.data) {
           setClientId(message.data.clientId || message.clientId);
@@ -208,7 +208,7 @@ export const useIntiCommunication = () => {
 
       // Handle connection establishment (Replit Agent format)
       if (message.type === 'connection_established') {
-        console.log('[IntiComm] Connection established, setting client ID:', message.data.connectionId);
+        console.log('[IntiComm-Auth] Connection established, setting client ID:', message.data.connectionId);
         setClientId(message.data.connectionId || message.data.clientId);
         
         // If authenticated, update auth state
@@ -243,7 +243,7 @@ export const useIntiCommunication = () => {
 
       // Handle legacy connection established
       if (message.type === 'connection.established') {
-        console.log('[IntiComm] Authentication status received from server:', message.data);
+        console.log('[IntiComm-Auth] Authentication status received from server:', message.data);
         
         // FIXED: Better auth state management
         if (message.data.authenticated && message.data.user) {
@@ -261,14 +261,14 @@ export const useIntiCommunication = () => {
           // Only clear auth if we don't have valid stored auth
           const hasStoredAuth = localStorage.getItem('inti_auth') || sessionStorage.getItem('inti_auth');
           if (!hasStoredAuth) {
-            console.log('[IntiComm] No server auth and no stored auth - setting unauthenticated state');
+            console.log('[IntiComm-Auth] No server auth and no stored auth - setting unauthenticated state');
             setAuthState({
               loading: false,
               authenticated: false,
               user: null,
             });
           } else {
-            console.log('[IntiComm] Server session not recognized, but maintaining stored authentication for user experience');
+            console.log('[IntiComm-Auth] Server session not recognized, but maintaining stored authentication for user experience');
             setAuthState(prev => ({ ...prev, loading: false }));
           }
         }
@@ -291,7 +291,7 @@ export const useIntiCommunication = () => {
     };
 
     ws.current.onclose = () => {
-      console.log('[IntiComm] WebSocket connection closed.');
+      console.log('[IntiComm-Auth] WebSocket connection closed.');
       setIsConnected(false);
       setClientId(null);
       // Don't clear auth state on disconnect - user might still be authenticated
