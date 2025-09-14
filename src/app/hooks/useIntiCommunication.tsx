@@ -163,21 +163,18 @@ export const useIntiCommunication = () => {
       // Handle auth.response message
       if (message.type === 'auth.response') {
         console.log('[IntiComm-Auth] 🔐 Auth response received:', message);
-        if (message.success && message.authenticated) {
+        if (message.authenticated) {
           setIsConnected(true);
           setClientId(message.clientId || message.data?.clientId || 'authenticated');
           
           if (message.user) {
             console.log('[IntiComm-Auth] ✅ Successfully authenticated user:', message.user.displayName || message.user.username);
-            // Store authenticated user
+            // Update auth state - database-canonical, no localStorage storage
             setAuthState({
               loading: false,
               authenticated: true,
               user: message.user
             });
-            const authData = { user: message.user, authenticated: true, sessionId: getSessionId() };
-            localStorage.setItem('inti_auth', JSON.stringify(authData));
-            sessionStorage.setItem('inti_auth', JSON.stringify(authData));
           }
         } else {
           console.log('[IntiComm-Auth] ❌ Authentication failed:', message.message || 'Unknown error');
@@ -198,9 +195,7 @@ export const useIntiCommunication = () => {
               authenticated: true,
               user: message.data.user
             });
-            const authData = { user: message.data.user, authenticated: true, sessionId: getSessionId() };
-            localStorage.setItem('inti_auth', JSON.stringify(authData));
-            sessionStorage.setItem('inti_auth', JSON.stringify(authData));
+            // Database-canonical auth - no localStorage storage needed
           }
         }
         return; // Don't process further
@@ -253,10 +248,7 @@ export const useIntiCommunication = () => {
             user: message.data.user,
           });
           
-          // Store auth with session info
-          const authData = { user: message.data.user, authenticated: true, sessionId: getSessionId() };
-          localStorage.setItem('inti_auth', JSON.stringify(authData));
-          sessionStorage.setItem('inti_auth', JSON.stringify(authData));
+          // Database-canonical auth - no localStorage storage needed
         } else {
           // Only clear auth if we don't have valid stored auth
           const hasStoredAuth = localStorage.getItem('inti_auth') || sessionStorage.getItem('inti_auth');

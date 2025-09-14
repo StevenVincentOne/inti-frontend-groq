@@ -444,11 +444,7 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
                 };
                 console.log('[IntiComm-Voice] Bootstrap auth success; user:', displayName);
                 setState(prev => ({ ...prev, loading: false, authenticated: true, user, error: null }));
-                const authData = { authenticated: true, user, sessionId: sessionFromUrl };
-                try {
-                  localStorage.setItem('inti_auth', JSON.stringify(authData));
-                  sessionStorage.setItem('inti_auth', JSON.stringify(authData));
-                } catch {}
+                // Database-canonical auth - no localStorage storage needed
                 try {
                   url.searchParams.delete('session');
                   url.searchParams.delete('sessionId');
