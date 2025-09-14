@@ -48,22 +48,16 @@ export const useIntiCommunication = () => {
       return urlSessionId;
     }
     
-    // 2. Check stored auth data and extract session ID (FIXED)
+    // 2. Check for session ID only (database-canonical approach)
     const storedAuth = localStorage.getItem('inti_auth') || sessionStorage.getItem('inti_auth');
     if (storedAuth) {
       try {
         const parsed = JSON.parse(storedAuth);
-        if (parsed.authenticated && parsed.user) {
-          console.log('[IntiComm-Auth] Found stored auth data for user:', parsed.user.displayName || parsed.user.username);
-          
-          // FIXED: Extract actual session ID from stored auth
-          if (parsed.sessionId) {
-            console.log('[IntiComm-Auth] Using stored session ID for WebSocket authentication');
-            return parsed.sessionId;
-          }
-          
-          
-}
+        // Only extract session ID - don't validate user data (database will handle that)
+        if (parsed.sessionId) {
+          console.log('[IntiComm-Auth] Found session ID for WebSocket authentication');
+          return parsed.sessionId;
+        }
       } catch {
         console.log('[IntiComm-Auth] Invalid stored auth data, clearing...');
         localStorage.removeItem('inti_auth');
@@ -85,26 +79,10 @@ export const useIntiCommunication = () => {
     return null;
   }, []);
 
-  // Check for stored auth and set initial state
+  // Database-canonical authentication - no localStorage checking needed
   const checkStoredAuth = useCallback(() => {
-    const storedAuth = localStorage.getItem('inti_auth') || sessionStorage.getItem('inti_auth');
-    if (storedAuth) {
-      try {
-        const parsed = JSON.parse(storedAuth);
-        if (parsed.authenticated && parsed.user && parsed.user.displayName && parsed.user.displayName !== 'Replit User') {
-          console.log('[IntiComm-Auth] Found valid stored authentication:', parsed.user.displayName);
-          setAuthState({
-            loading: false,
-            authenticated: true,
-            user: parsed.user
-          });
-          return true;
-        }
-      } catch {
-        localStorage.removeItem('inti_auth');
-        sessionStorage.removeItem('inti_auth');
-      }
-    }
+    // Database-driven auth will provide user data via WebSocket
+    // No localStorage fallback needed
     return false;
   }, []);
 
