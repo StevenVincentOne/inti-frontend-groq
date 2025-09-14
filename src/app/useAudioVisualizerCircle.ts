@@ -132,10 +132,14 @@ const drawUserProfileImage = (
   const canvasCache = canvas as HTMLCanvasElement & { [key: string]: HTMLImageElement };
   const cachedImg = canvasCache[cacheKey];
   
-  if (cachedImg && cachedImg.complete) {
-    // Draw cached image
+  if (cachedImg && cachedImg.complete && cachedImg.naturalWidth > 0 && cachedImg.naturalHeight > 0) {
+    // Draw cached image (only if not broken)
     drawProfileImage(canvasCtx, cachedImg, centerX, centerY, logoSize, positioning);
-  } else if (!cachedImg) {
+  } else if (!cachedImg || (cachedImg.complete && (cachedImg.naturalWidth === 0 || cachedImg.naturalHeight === 0))) {
+    // Clear broken cached image if it exists
+    if (cachedImg && cachedImg.complete && (cachedImg.naturalWidth === 0 || cachedImg.naturalHeight === 0)) {
+      delete canvasCache[cacheKey];
+    }
     // Load image for the first time
     img.onload = () => {
       canvasCache[cacheKey] = img;
@@ -238,25 +242,39 @@ const drawProfileImage = (
   logoSize: number,
   positioning: Positioning
 ) => {
+  // Validate image state before drawing
+  if (!img.complete || img.naturalWidth === 0 || img.naturalHeight === 0) {
+    console.warn('Profile image not loaded or broken, using text fallback');
+    drawTextLogo(canvasCtx, centerX, centerY, positioning, "U");
+    return;
+  }
+
   canvasCtx.save();
-  
-  // Create circular clipping path for profile image
-  const profileRadius = positioning.radius * 0.6; // Slightly smaller than Inti logo
-  canvasCtx.beginPath();
-  canvasCtx.arc(centerX, centerY, profileRadius, 0, Math.PI * 2);
-  canvasCtx.clip();
-  
-  // Set transparency
-  canvasCtx.globalAlpha = 0.7; // Slightly more opaque than Inti logo
-  
-  // Calculate size to fill the circular area
-  const imageSize = profileRadius * 2;
-  const drawX = centerX - imageSize / 2;
-  const drawY = centerY - imageSize / 2;
-  
-  // Draw the profile image to fill the circle
-  canvasCtx.drawImage(img, drawX, drawY, imageSize, imageSize);
-  
+
+  try {
+    // Create circular clipping path for profile image
+    const profileRadius = positioning.radius * 0.6; // Slightly smaller than Inti logo
+    canvasCtx.beginPath();
+    canvasCtx.arc(centerX, centerY, profileRadius, 0, Math.PI * 2);
+    canvasCtx.clip();
+
+    // Set transparency
+    canvasCtx.globalAlpha = 0.7; // Slightly more opaque than Inti logo
+
+    // Calculate size to fill the circular area
+    const imageSize = profileRadius * 2;
+    const drawX = centerX - imageSize / 2;
+    const drawY = centerY - imageSize / 2;
+
+    // Draw the profile image to fill the circle
+    canvasCtx.drawImage(img, drawX, drawY, imageSize, imageSize);
+  } catch (error) {
+    console.error('Error drawing profile image:', error);
+    canvasCtx.restore();
+    drawTextLogo(canvasCtx, centerX, centerY, positioning, "U");
+    return;
+  }
+
   canvasCtx.restore();
 };
 
