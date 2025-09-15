@@ -53,6 +53,7 @@ const Unmute = () => {
   const [showUserViz, setShowUserViz] = useState(true);
   const [sessionReady, setSessionReady] = useState(false);
   const sessionReadyRef = useRef(false);
+  const sessionInitializedRef = useRef<boolean>(false);
   // const [showLiveText, setShowLiveText] = useState(false);
 
   useWakeLock(shouldConnect);
@@ -137,6 +138,16 @@ const Unmute = () => {
       },
     }
   );
+
+  // Keep latest deps in refs to avoid effect re-runs on identity changes
+  const latestUnmuteConfigRef = useRef<UnmuteConfig>(unmuteConfig);
+  useEffect(() => { latestUnmuteConfigRef.current = unmuteConfig; }, [unmuteConfig]);
+  const resetUCORef = useRef(resetUCO);
+  useEffect(() => { resetUCORef.current = resetUCO; }, [resetUCO]);
+  const formatMessageWithUCORef = useRef(formatMessageWithUCO);
+  useEffect(() => { formatMessageWithUCORef.current = formatMessageWithUCO; }, [formatMessageWithUCO]);
+  const sendMessageRef = useRef(sendMessage);
+  useEffect(() => { sendMessageRef.current = sendMessage; }, [sendMessage]);
 
   const commitAndRequestResponse = useCallback(() => {
     try {
@@ -331,47 +342,49 @@ const Unmute = () => {
     }
   }, [audioProcessor, lastMessage]);
 
-  // When we connect, we send the initial config (voice and instructions) to the server.
-  // Also clear the chat history.
+  // When we connect, send the initial config once per connection and clear the chat history.
   useEffect(() => {
     if (readyState !== ReadyState.OPEN) return;
+    if (sessionInitializedRef.current) return; // prevent resend loop on rerenders
+    sessionInitializedRef.current = true;
 
     const recordingConsent =
       localStorage.getItem(COOKIE_CONSENT_STORAGE_KEY) === "true";
 
     setRawChatHistory([]);
-    resetUCO(); // Reset UCO formatter for new conversation
+    resetUCORef.current(); // Reset UCO formatter for new conversation
     setSessionReady(false);
     sessionReadyRef.current = false;
     
-    // Build UCO-aware system prompt based on instruction type
+    // Build UCO-aware system prompt based on instruction type (from latest ref)
+    const cfg = latestUnmuteConfigRef.current;
     let ucoInstructions;
-    if (unmuteConfig.instructions.type === "constant") {
+    if (cfg.instructions.type === "constant") {
       ucoInstructions = {
         type: "constant",
-        text: buildUCOSystemPrompt(unmuteConfig.instructions.text, unmuteConfig.instructions.language || "en"),
-        language: unmuteConfig.instructions.language
+        text: buildUCOSystemPrompt(cfg.instructions.text, cfg.instructions.language || "en"),
+        language: cfg.instructions.language
       };
-    } else if (unmuteConfig.instructions.type === "smalltalk") {
+    } else if (cfg.instructions.type === "smalltalk") {
       ucoInstructions = {
         type: "constant",
         text: buildUCOSystemPrompt(
           buildUCOSmalltalkInstructions(),
-          unmuteConfig.instructions.language || "en"
+          cfg.instructions.language || "en"
         ),
-        language: unmuteConfig.instructions.language
+        language: cfg.instructions.language
       };
     } else {
       // For other types, keep original with UCO basics added
-      ucoInstructions = unmuteConfig.instructions;
+      ucoInstructions = cfg.instructions;
     }
     console.log('[VoiceWS] Sending session.update');
-    sendMessage(
+    sendMessageRef.current(
       JSON.stringify({
         type: "session.update",
         session: {
           instructions: ucoInstructions,
-          voice: unmuteConfig.voice,
+          voice: cfg.voice,
           allow_recording: recordingConsent,
         },
       })
@@ -382,7 +395,7 @@ const Unmute = () => {
       if (sentInitialUCORef.current) return;
       
       try {
-        const fm: any = formatMessageWithUCO('', 'session_start', true, true); // waitForReady=true
+        const fm: any = formatMessageWithUCORef.current('', 'session_start', true, true); // waitForReady=true
         
         if (typeof fm === 'object' && fm.status === 'not_ready') {
           // UCO not ready yet, try again in 1500ms (throttled)
@@ -414,7 +427,14 @@ const Unmute = () => {
     
     // Start the UCO readiness checking process
     sendInitialUCOWhenReady();
-  }, [unmuteConfig, readyState, sendMessage, resetUCO, formatMessageWithUCO]);
+  }, [readyState]);
+
+  // Reset session init guard when socket closes
+  useEffect(() => {
+    if (readyState === ReadyState.CLOSED || readyState === ReadyState.CLOSING) {
+      sessionInitializedRef.current = false;
+    }
+  }, [readyState]);
 
   // Log socket state transitions for debugging
   useEffect(() => {
