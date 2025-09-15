@@ -385,9 +385,12 @@ const Unmute = () => {
         const fm: any = formatMessageWithUCO('', 'session_start', true, true); // waitForReady=true
         
         if (typeof fm === 'object' && fm.status === 'not_ready') {
-          // UCO not ready yet, try again in 500ms
-          console.log('[UCO] Not ready for initial send, retrying...', fm.debug);
-          setTimeout(sendInitialUCOWhenReady, 500);
+          // UCO not ready yet, try again in 1500ms (throttled)
+          if ((window as any).__UCO_NOT_READY_LOGGED__ !== true) {
+            console.log('[UCO] Not ready for initial send (throttled) ...');
+            (window as any).__UCO_NOT_READY_LOGGED__ = true;
+          }
+          setTimeout(sendInitialUCOWhenReady, 1500);
           return;
         }
         

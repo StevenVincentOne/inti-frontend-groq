@@ -190,6 +190,38 @@ export function useUCO(options: UCOHookOptions = {}) {
     onUpdate
   } = options;
   
+  // Silence UCO logs in production unless explicitly enabled
+  useEffect(() => {
+    try {
+      const isDebug =
+        (typeof window !== 'undefined' &&
+          ((localStorage.getItem('INTI_DEBUG') || '').toLowerCase().includes('uco'))) ||
+        (process.env.NEXT_PUBLIC_UCO_DEBUG === 'true');
+      if (isDebug) return;
+
+      const tagRegex = /^\[(UCO|UCO-DB|UCOFormatter)\]/;
+      const orig = {
+        log: console.log,
+        info: console.info,
+        warn: console.warn,
+        error: console.error,
+      };
+      const filter = (args: any[]) =>
+        !(typeof args[0] === 'string' && tagRegex.test(args[0] as string));
+      console.log = (...args: any[]) => { if (filter(args)) orig.log(...args); };
+      console.info = (...args: any[]) => { if (filter(args)) orig.info(...args); };
+      console.warn = (...args: any[]) => { if (filter(args)) orig.warn(...args); };
+      console.error = (...args: any[]) => { if (filter(args)) orig.error(...args); };
+
+      return () => {
+        console.log = orig.log;
+        console.info = orig.info;
+        console.warn = orig.warn;
+        console.error = orig.error;
+      };
+    } catch {}
+  }, []);
+  
   // State - now storing v15 format
   const [uco, setUCO] = useState<UCOv15 | null>(null);
   const [loading, setLoading] = useState(true);
