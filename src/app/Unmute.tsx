@@ -458,12 +458,42 @@ const Unmute = () => {
     }
   }, [uco, readyState, formatMessageWithUCO, sendUCOItem]);
 
-  // Disconnect when the voice or instruction changes.
-  // TODO: If it's a voice change, immediately reconnect with the new voice.
+  // On voice/instruction change, update the live session instead of disconnecting.
   useEffect(() => {
-    setShouldConnect(false);
-    shutdownAudio();
-  }, [shutdownAudio, unmuteConfig.voice, unmuteConfig.instructions]);
+    if (readyState !== ReadyState.OPEN) return;
+    const cfg = latestUnmuteConfigRef.current;
+    let ucoInstructions;
+    if (cfg.instructions.type === "constant") {
+      ucoInstructions = {
+        type: "constant",
+        text: buildUCOSystemPrompt(cfg.instructions.text, cfg.instructions.language || "en"),
+        language: cfg.instructions.language
+      };
+    } else if (cfg.instructions.type === "smalltalk") {
+      ucoInstructions = {
+        type: "constant",
+        text: buildUCOSystemPrompt(
+          buildUCOSmalltalkInstructions(),
+          cfg.instructions.language || "en"
+        ),
+        language: cfg.instructions.language
+      };
+    } else {
+      ucoInstructions = cfg.instructions;
+    }
+    const recordingConsent = localStorage.getItem(COOKIE_CONSENT_STORAGE_KEY) === "true";
+    console.log('[VoiceWS] Config changed; sending session.update');
+    sendMessageRef.current(
+      JSON.stringify({
+        type: "session.update",
+        session: {
+          instructions: ucoInstructions,
+          voice: cfg.voice,
+          allow_recording: recordingConsent,
+        },
+      })
+    );
+  }, [readyState, unmuteConfig.voice, unmuteConfig.instructions]);
 
   if (!healthStatus || !backendServerUrl) {
     return (
