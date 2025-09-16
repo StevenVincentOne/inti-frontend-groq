@@ -30,6 +30,16 @@ import { useUCOMessageFormatter } from "./hooks/useUCOMessageFormatter";
 import { useUCO } from "./hooks/useUCO";
 import { buildUCOSystemPrompt, buildUCOSmalltalkInstructions } from "./prompts/ucoSystemPrompt";
 
+// Helper to create OpenAI Realtime API compliant messages
+const createRealtimeMessage = (type: string, data?: any) => {
+  const eventId = `event_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  return JSON.stringify({
+    type,
+    event_id: eventId,
+    ...data
+  });
+};
+
 const Unmute = () => {
   const { user } = useAuth();
   const { isDevMode, showSubtitles, toggleSubtitles } = useKeyboardShortcuts();
@@ -152,8 +162,8 @@ const Unmute = () => {
   const commitAndRequestResponse = useCallback(() => {
     try {
       console.log('[VoiceWS] Committing audio buffer and requesting response');
-      sendMessage(JSON.stringify({ type: 'input_audio_buffer.commit' }));
-      sendMessage(JSON.stringify({ type: 'response.create' }));
+      sendMessage(createRealtimeMessage('input_audio_buffer.commit'));
+      sendMessage(createRealtimeMessage('response.create'));
     } catch (e) {
       console.warn('[VoiceWS] Failed to commit/request response:', e);
     }
@@ -198,8 +208,7 @@ const Unmute = () => {
         return;
       }
       sendMessage(
-        JSON.stringify({
-          type: "input_audio_buffer.append",
+        createRealtimeMessage("input_audio_buffer.append", {
           audio: base64EncodeOpus(opus),
         })
       );
@@ -484,8 +493,7 @@ const Unmute = () => {
     const recordingConsent = localStorage.getItem(COOKIE_CONSENT_STORAGE_KEY) === "true";
     console.log('[VoiceWS] Config changed; sending session.update');
     sendMessageRef.current(
-      JSON.stringify({
-        type: "session.update",
+      createRealtimeMessage("session.update", {
         session: {
           instructions: ucoInstructions,
           voice: cfg.voice,
