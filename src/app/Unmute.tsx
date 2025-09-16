@@ -159,15 +159,7 @@ const Unmute = () => {
   const sendMessageRef = useRef(sendMessage);
   useEffect(() => { sendMessageRef.current = sendMessage; }, [sendMessage]);
 
-  const commitAndRequestResponse = useCallback(() => {
-    try {
-      console.log('[VoiceWS] Committing audio buffer and requesting response');
-      sendMessage(createRealtimeMessage('input_audio_buffer.commit'));
-      sendMessage(createRealtimeMessage('response.create'));
-    } catch (e) {
-      console.warn('[VoiceWS] Failed to commit/request response:', e);
-    }
-  }, [sendMessage]);
+  // Removed commitAndRequestResponse - backend uses server-side VAD and triggers inference automatically
 
   // UCO integration helpers
   const { uco, getMinimalMarkdown } = useUCO();
@@ -289,11 +281,30 @@ const Unmute = () => {
       console.log('[VoiceWS] Received session.updated, enabling audio send');
       setSessionReady(true);
       sessionReadyRef.current = true;
+
+      // Restart Opus recorder to send a fresh Ogg Opus stream (includes BOS)
+      const ap = audioProcessor.current;
+      if (ap && ap.opusRecorder) {
+        try {
+          ap.opusRecorder.stop();
+          setTimeout(() => {
+            try { 
+              ap.opusRecorder.start(); 
+              console.log('[VoiceWS] OpusRecorder restarted for fresh BOS stream');
+            } catch (e) { 
+              console.warn('[VoiceWS] Failed to restart OpusRecorder:', e); 
+            }
+          }, 50);
+        } catch (e) {
+          console.warn('[VoiceWS] Failed to stop OpusRecorder for restart:', e);
+        }
+      }
       return;
     }
     if (data.type === 'input_audio_buffer.speech_stopped') {
-      // End of utterance detected by server VAD; trigger inference
-      commitAndRequestResponse();
+      // Server VAD detected end of speech - backend will trigger inference automatically
+      // Do not send commit/response.create as these are invalid messages for this backend
+      console.log('[VoiceWS] Speech stopped detected by server VAD');
     } else if (data.type === "response.audio.delta") {
       const opus = base64DecodeOpus(data.delta);
       const ap = audioProcessor.current;
@@ -389,8 +400,7 @@ const Unmute = () => {
     }
     console.log('[VoiceWS] Sending session.update');
     sendMessageRef.current(
-      JSON.stringify({
-        type: "session.update",
+      createRealtimeMessage("session.update", {
         session: {
           instructions: ucoInstructions,
           voice: cfg.voice,
