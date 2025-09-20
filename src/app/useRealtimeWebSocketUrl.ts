@@ -15,6 +15,7 @@ export const useRealtimeWebSocketUrl = () => {
       const lsUrl = localStorage.getItem('INTI_WS_URL');
       if (lsUrl && lsUrl.trim().length > 0) {
         const val = lsUrl.trim();
+        console.log('[useRealtimeWebSocketUrl] Using localStorage override:', val);
         // Support absolute or relative path
         if (val.startsWith('ws://') || val.startsWith('wss://')) {
           setWsUrl(val.replace(/\/$/, ""));
@@ -32,15 +33,19 @@ export const useRealtimeWebSocketUrl = () => {
     // Build-time override
     const explicit = process.env.NEXT_PUBLIC_WS_URL;
     if (explicit && explicit.trim().length > 0) {
+      console.log('[useRealtimeWebSocketUrl] Using env override:', explicit);
       setWsUrl(explicit.replace(/\/$/, ""));
       return;
     }
 
+    // Default: derive from current location
     const loc = new URL(window.location.href);
     loc.protocol = loc.protocol === "https:" ? "wss:" : "ws:";
     loc.pathname = "/v1/realtime";
     loc.search = "";
-    setWsUrl(loc.toString());
+    const derivedUrl = loc.toString();
+    console.log('[useRealtimeWebSocketUrl] Using derived URL:', derivedUrl);
+    setWsUrl(derivedUrl);
   }, []);
 
   return wsUrl;

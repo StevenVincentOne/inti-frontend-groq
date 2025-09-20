@@ -135,7 +135,14 @@ const Unmute = () => {
     return [envVal];
   })();
 
-  const socketUrl = shouldConnect ? webSocketUrl : null;
+  // Only connect if we have both shouldConnect AND a valid WebSocket URL
+  const socketUrl = (shouldConnect && webSocketUrl) ? webSocketUrl : null;
+  
+  // Debug logging for WebSocket URL
+  useEffect(() => {
+    console.log('[VoiceWS] Debug - shouldConnect:', shouldConnect, 'webSocketUrl:', webSocketUrl, 'socketUrl:', socketUrl);
+  }, [shouldConnect, webSocketUrl, socketUrl]);
+  
   const { sendMessage, lastMessage, readyState } = useWebSocket(
     socketUrl,
     {
@@ -146,6 +153,10 @@ const Unmute = () => {
       onClose: (event) => {
         console.log('[VoiceWS] onClose:', event.code, event.reason || '(no reason)');
       },
+      // IMPORTANT: Don't attempt connection if URL is null
+      shouldReconnect: () => socketUrl !== null,
+      reconnectAttempts: socketUrl ? 10 : 0,
+      reconnectInterval: socketUrl ? 3000 : 0,
     }
   );
 
