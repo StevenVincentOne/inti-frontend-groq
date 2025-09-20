@@ -82,7 +82,7 @@ const Unmute = () => {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 3000);
 
-        const response = await fetch(`${backendServerUrl}/v1/health`, {
+        const response = await fetch(`${backendServerUrl}/health`, {
           signal: controller.signal,
         });
 
