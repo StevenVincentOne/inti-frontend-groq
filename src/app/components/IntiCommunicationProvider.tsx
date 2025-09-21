@@ -488,27 +488,8 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
       }
     } catch {}
 
-    // Fallback: if another auth bridge (Replit) has stored auth, reflect it
+    // Set up storage event listener for cross-tab auth sync
     try {
-      const stored = localStorage.getItem('inti_auth') || sessionStorage.getItem('inti_auth');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (parsed?.authenticated && parsed?.user?.displayName && parsed.user.displayName !== 'Replit User') {
-          setState(prev => ({
-            ...prev,
-            loading: false,
-            authenticated: true,
-            user: {
-              id: parsed.user.id || parsed.user.userId || 'authenticated_user',
-              displayName: parsed.user.displayName,
-              username: parsed.user.username || parsed.user.displayName,
-              email: parsed.user.email || null,
-              profileImage: extractProfileImage(parsed.user)
-            },
-            error: null
-          }));
-        }
-      }
       const onStorage = (e: StorageEvent) => {
         if (e.key === 'inti_auth') {
           try {
