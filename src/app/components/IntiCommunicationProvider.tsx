@@ -488,29 +488,9 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
       }
     } catch {}
 
-    // Set up storage event listener for cross-tab auth sync
-    try {
-      const onStorage = (e: StorageEvent) => {
-        if (e.key === 'inti_auth') {
-          try {
-            const v = e.newValue ? JSON.parse(e.newValue) : null;
-            if (v?.authenticated && v?.user) {
-              setState(prev => ({ ...prev, authenticated: true, user: {
-                id: v.user.id || v.user.userId || 'authenticated_user',
-                displayName: v.user.displayName,
-                username: v.user.username || v.user.displayName,
-                email: v.user.email || null,
-                profileImage: extractProfileImage(v.user)
-              }, loading: false, error: null }));
-            } else {
-              setState(prev => ({ ...prev, authenticated: false, user: null }));
-            }
-          } catch {}
-        }
-      };
-      window.addEventListener('storage', onStorage);
-      (window as any).__intiOnStorage = onStorage;
-    } catch {}
+    // TODO: Re-enable storage event listener after fixing compilation issue
+    // Cross-tab auth sync temporarily disabled to isolate JavaScript error
+    console.log('[IntiComm-Voice] Storage event listener temporarily disabled');
 
     // Safety valve: never block UI indefinitely; clear loading after a short timeout
     if (!authCheckTimeoutRef.current) {
@@ -530,10 +510,7 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
       if (wsRef.current) {
         wsRef.current.close();
       }
-      try {
-        const onStorage = (window as any).__intiOnStorage;
-        if (onStorage) window.removeEventListener('storage', onStorage);
-      } catch {}
+      // Storage event listener cleanup temporarily disabled
     };
   }, []); // Empty deps to run only on mount
 
