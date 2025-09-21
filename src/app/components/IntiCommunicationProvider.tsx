@@ -413,7 +413,34 @@ export function IntiCommunicationProvider({ children }: { children: React.ReactN
   // Initialize connection on mount - FIXED: Always connect for real-time features
   useEffect(() => {
     console.log('[IntiComm-Voice] Provider mounted, initializing...');
-    // Database-canonical: Skip preflight auth, rely on WebSocket only
+
+    // CRITICAL FIX: Load stored auth IMMEDIATELY for UI consistency during WebSocket connection
+    // This ensures Welcome overlay shows user name even during initial connection delay
+    try {
+      const stored = localStorage.getItem('inti_auth') || sessionStorage.getItem('inti_auth');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed?.authenticated && parsed?.user?.displayName && parsed.user.displayName !== 'Replit User') {
+          console.log('[IntiComm-Voice] 🚀 Loading stored auth for immediate UI:', parsed.user.displayName);
+          setState(prev => ({
+            ...prev,
+            loading: false,
+            authenticated: true,
+            user: {
+              id: parsed.user.id || parsed.user.userId || 'authenticated_user',
+              displayName: parsed.user.displayName,
+              username: parsed.user.username || parsed.user.displayName,
+              email: parsed.user.email || null,
+              profileImage: extractProfileImage(parsed.user)
+            },
+            error: null
+          }));
+          authStateRef.current = true;
+        }
+      }
+    } catch (error) {
+      console.log('[IntiComm-Voice] Error loading stored auth:', error);
+    }
 
     // ALWAYS connect to WebSocket for real-time features (chat, updates, etc.)
     console.log('[IntiComm-Voice] Establishing WebSocket connection for real-time features...');
