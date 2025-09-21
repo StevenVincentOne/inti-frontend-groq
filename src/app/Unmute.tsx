@@ -137,14 +137,17 @@ const Unmute = () => {
 
   // Only connect if we have both shouldConnect AND a valid WebSocket URL
   const socketUrl = (shouldConnect && webSocketUrl) ? webSocketUrl : null;
-  
+
   // Debug logging for WebSocket URL
   useEffect(() => {
-    console.log('[VoiceWS] Debug - shouldConnect:', shouldConnect, 'webSocketUrl:', webSocketUrl, 'socketUrl:', socketUrl);
-  }, [shouldConnect, webSocketUrl, socketUrl]);
+    console.log('[VoiceWS] Debug - shouldConnect:', shouldConnect, 'webSocketUrl:', webSocketUrl, 'socketUrl:', socketUrl, 'finalSocketUrl:', finalSocketUrl);
+  }, [shouldConnect, webSocketUrl, socketUrl, finalSocketUrl]);
+
+  // Additional safety: Ensure URL is production URL
+  const finalSocketUrl = socketUrl && socketUrl.includes('localhost') ? null : socketUrl;
   
   const { sendMessage, lastMessage, readyState } = useWebSocket(
-    socketUrl,
+    finalSocketUrl,
     {
       protocols: realtimeProtocols,
       onOpen: () => {
