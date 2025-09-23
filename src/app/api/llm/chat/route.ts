@@ -55,9 +55,9 @@ async function verifyAuth(request: NextRequest): Promise<boolean> {
 export async function POST(request: NextRequest) {
   try {
     // Get client IP for rate limiting
-    const headersList = headers();
-    const clientIp = headersList.get('x-forwarded-for') || 
-                    headersList.get('x-real-ip') || 
+    const headersList = await headers();
+    const clientIp = headersList.get('x-forwarded-for') ||
+                    headersList.get('x-real-ip') ||
                     'unknown';
     
     // Check rate limit

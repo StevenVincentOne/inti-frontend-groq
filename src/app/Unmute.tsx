@@ -32,10 +32,9 @@ import { buildUCOSystemPrompt, buildUCOSmalltalkInstructions } from "./prompts/u
 
 // Helper to create OpenAI Realtime API compliant messages
 const createRealtimeMessage = (type: string, data?: any) => {
-  const eventId = `event_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   return JSON.stringify({
     type,
-    event_id: eventId,
+    event_id: `event_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
     ...data
   });
 };
@@ -209,10 +208,15 @@ const Unmute = () => {
   // Send microphone audio to the server (via useAudioProcessor below)
   const onOpusRecorded = useCallback(
     (opus: Uint8Array) => {
+      console.log('[VoiceWS] 🎤 onOpusRecorded called - audio data:', opus.length, 'bytes, sessionReady:', sessionReadyRef.current);
+
       if (!sessionReadyRef.current) {
+        console.log('[VoiceWS] ⚠️ DROPPING audio frame - session not ready');
         // Drop audio frames until session is confirmed ready
         return;
       }
+
+      console.log('[VoiceWS] 📤 SENDING audio frame to backend');
       sendMessage(
         createRealtimeMessage("input_audio_buffer.append", {
           audio: base64EncodeOpus(opus),
@@ -300,18 +304,43 @@ const Unmute = () => {
       const ap = audioProcessor.current;
       if (ap && ap.opusRecorder) {
         try {
+          console.log('[VoiceWS] 🔄 Starting OpusRecorder restart sequence...');
           ap.opusRecorder.stop();
+          console.log('[VoiceWS] ⏹️ OpusRecorder stopped');
+
           setTimeout(() => {
-            try { 
-              ap.opusRecorder.start(); 
-              console.log('[VoiceWS] OpusRecorder restarted for fresh BOS stream');
-            } catch (e) { 
-              console.warn('[VoiceWS] Failed to restart OpusRecorder:', e); 
+            try {
+              // Ensure audio context is active
+              if (ap.audioContext.state === 'suspended') {
+                console.log('[VoiceWS] 🔊 Resuming suspended audio context...');
+                ap.audioContext.resume();
+              }
+
+              ap.opusRecorder.start();
+              console.log('[VoiceWS] ✅ OpusRecorder restarted for fresh BOS stream');
+              console.log('[VoiceWS] 🎙️ Audio context state:', ap.audioContext.state);
+              console.log('[VoiceWS] 📊 OpusRecorder sample rate:', ap.opusRecorder.encoderSampleRate);
+
+              // Log when first audio data arrives
+              let firstDataReceived = false;
+              const originalOndataavailable = ap.opusRecorder.ondataavailable;
+              ap.opusRecorder.ondataavailable = (data: Uint8Array) => {
+                if (!firstDataReceived) {
+                  console.log('[VoiceWS] 🎵 FIRST AUDIO DATA after restart:', data.length, 'bytes');
+                  firstDataReceived = true;
+                }
+                originalOndataavailable?.(data);
+              };
+
+            } catch (e) {
+              console.error('[VoiceWS] ❌ Failed to restart OpusRecorder:', e);
             }
           }, 50);
         } catch (e) {
-          console.warn('[VoiceWS] Failed to stop OpusRecorder for restart:', e);
+          console.error('[VoiceWS] ❌ Failed to stop OpusRecorder for restart:', e);
         }
+      } else {
+        console.warn('[VoiceWS] ⚠️ No audioProcessor or opusRecorder available for restart');
       }
       return;
     }

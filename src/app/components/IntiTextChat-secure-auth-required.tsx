@@ -37,7 +37,7 @@ export const IntiTextChat: React.FC<IntiTextChatProps> = ({
   } = useIntiCommunication();
   
   // Memory chat integration
-  const memoryChat = useMemoryChat(topicUuid || 'default-topic', authState?.user?.id || 1);
+  const memoryChat = useMemoryChat(topicUuid || 'default-topic', Number(authState?.user?.id) || 1);
   
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
