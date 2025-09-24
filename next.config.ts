@@ -5,6 +5,10 @@ const nextConfig: NextConfig = {
   eslint: { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors: true },
   output: "standalone", // For Docker
+  productionBrowserSourceMaps: true, // Enable source maps for debugging
+  experimental: {
+    serverMinification: false, // Disable server minification for debugging
+  },
   // Configure `pageExtensions` to include markdown and MDX files
   pageExtensions: ["js", "jsx", "md", "mdx", "ts", "tsx"],
   async headers() {
