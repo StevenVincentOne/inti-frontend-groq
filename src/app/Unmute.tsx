@@ -39,6 +39,21 @@ const createRealtimeMessage = (type: string, data?: any) => {
   });
 };
 
+const PCM_BYTES_PER_SAMPLE = 2;
+const isLikelyOgg = (bytes: Uint8Array) =>
+  bytes.length >= 4 && bytes[0] === 0x4f && bytes[1] === 0x67 && bytes[2] === 0x67 && bytes[3] === 0x53;
+
+const uint8PcmToFloat32 = (pcmBytes: Uint8Array) => {
+  const sampleCount = Math.floor(pcmBytes.byteLength / PCM_BYTES_PER_SAMPLE);
+  const float32 = new Float32Array(sampleCount);
+  const view = new DataView(pcmBytes.buffer, pcmBytes.byteOffset, sampleCount * PCM_BYTES_PER_SAMPLE);
+  for (let i = 0; i < sampleCount; i += 1) {
+    const int16 = view.getInt16(i * PCM_BYTES_PER_SAMPLE, true);
+    float32[i] = int16 / 32768;
+  }
+  return float32;
+};
+
 const Unmute = () => {
   const { user } = useAuth();
   const { isDevMode, showSubtitles, toggleSubtitles } = useKeyboardShortcuts();
@@ -308,12 +323,25 @@ const Unmute = () => {
       const ap = audioProcessor.current;
       if (!ap) return;
 
-      ap.decoder.postMessage(
+      if (isLikelyOgg(audioBytes) && ap.decoder) {
+        ap.decoder.postMessage(
+          {
+            command: "decode",
+            pages: audioBytes,
+          },
+          [audioBytes.buffer]
+        );
+        return;
+      }
+
+      const pcmFrame = uint8PcmToFloat32(audioBytes);
+      ap.outputWorklet.port.postMessage(
         {
-          command: "decode",
-          pages: audioBytes,
+          frame: pcmFrame,
+          type: "audio",
+          micDuration: 0,
         },
-        [audioBytes.buffer]
+        [pcmFrame.buffer]
       );
     } else if (data.type === "unmute.additional_outputs") {
       setDebugDict(data.args.debug_dict);
