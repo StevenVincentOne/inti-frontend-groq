@@ -1,5 +1,7 @@
 import { useRef, useCallback } from "react";
-import OpusRecorder from "opus-recorder";
+
+const PCM_SAMPLE_RATE = 24000;
+const PCM_FRAME_SAMPLES = 480; // 20ms at 24 kHz
 
 const getAudioWorkletNode = async (
   audioContext: AudioContext,
@@ -15,16 +17,47 @@ const getAudioWorkletNode = async (
 
 export interface AudioProcessor {
   audioContext: AudioContext;
-  opusRecorder: OpusRecorder;
-  decoder: DecoderWorker;
+  decoder: Worker;
   outputWorklet: AudioWorkletNode;
   inputAnalyser: AnalyserNode;
   outputAnalyser: AnalyserNode;
   mediaStreamDestination: MediaStreamAudioDestinationNode;
+  captureNode: AudioWorkletNode | ScriptProcessorNode;
+  cleanupCapture: () => void;
 }
 
+const floatChunkToInt16 = (chunk: number[] | Float32Array) => {
+  const pcm = new Int16Array(chunk.length);
+  for (let i = 0; i < chunk.length; i += 1) {
+    const sample = Math.max(-1, Math.min(1, chunk[i] ?? 0));
+    pcm[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+  }
+  return new Uint8Array(pcm.buffer);
+};
+
+const downsample = (
+  input: number[] | Float32Array,
+  ratio: number,
+  outputLength: number
+) => {
+  const output = new Float32Array(outputLength);
+  for (let i = 0; i < outputLength; i += 1) {
+    const start = Math.floor(i * ratio);
+    const rawEnd = Math.floor((i + 1) * ratio);
+    const end = rawEnd > start ? rawEnd : start + 1;
+    let acc = 0;
+    let count = 0;
+    for (let j = start; j < end && j < input.length; j += 1) {
+      acc += input[j] ?? 0;
+      count += 1;
+    }
+    output[i] = count > 0 ? acc / count : input[Math.min(start, input.length - 1)] ?? 0;
+  }
+  return output;
+};
+
 export const useAudioProcessor = (
-  onOpusRecorded: (chunk: Uint8Array) => void
+  onPcmRecorded: (chunk: Uint8Array) => void
 ) => {
   const audioProcessorRef = useRef<AudioProcessor | null>(null);
 
@@ -37,8 +70,8 @@ export const useAudioProcessor = (
         audioContext,
         "audio-output-processor"
       );
+
       const source = audioContext.createMediaStreamSource(mediaStream);
-      // source.connect(inputWorklet);
       const inputAnalyser = audioContext.createAnalyser();
       inputAnalyser.fftSize = 2048;
       source.connect(inputAnalyser);
@@ -50,108 +83,159 @@ export const useAudioProcessor = (
 
       outputWorklet.connect(audioContext.destination);
       const outputAnalyser = audioContext.createAnalyser();
-      outputAnalyser.fftSize = 2048;
       outputWorklet.connect(outputAnalyser);
 
       const decoder = new Worker("/decoderWorker.min.js");
       let micDuration = 0;
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      decoder.onmessage = (event: MessageEvent<any>) => {
+      decoder.onmessage = (event: MessageEvent) => {
         if (!event.data) {
           return;
         }
-        const frame = event.data[0];
+        const frame = (event.data as ArrayLike<number>)[0];
         outputWorklet.port.postMessage({
-          frame: frame,
+          frame,
           type: "audio",
-          micDuration: micDuration,
+          micDuration,
         });
       };
+
       decoder.postMessage({
         command: "init",
-        bufferLength: (960 * audioContext.sampleRate) / 24000,
-        decoderSampleRate: 24000,
+        bufferLength: (960 * audioContext.sampleRate) / PCM_SAMPLE_RATE,
+        decoderSampleRate: PCM_SAMPLE_RATE,
         outputBufferSampleRate: audioContext.sampleRate,
         resampleQuality: 0,
       });
 
-      // For buffer length: 960 = 24000 / 12.5 / 2
-      // The /2 is a bit optional, but won't hurt for recording the mic.
-      // Note that bufferLength actually has 0 impact for mono audio, only
-      // the frameSize and maxFramesPerPage seems to have any.
-      const recorderOptions = {
-        mediaTrackConstraints: {
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: false,
-            autoGainControl: true,
-            channelCount: 1,
-          },
-          video: false,
-        },
-        encoderPath: "/encoderWorker.min.js",
-        bufferLength: Math.round((960 * audioContext.sampleRate) / 24000),
-        encoderFrameSize: 20,
-        encoderSampleRate: 24000,
-        maxFramesPerPage: 2,
-        numberOfChannels: 1,
-        recordingGain: 1,
-        resampleQuality: 3,
-        encoderComplexity: 0,
-        encoderApplication: 2049,
-        streamPages: true,
-      };
-      let chunk_idx = 0;
-      let lastpos = 0;
-      const opusRecorder = new OpusRecorder(recorderOptions);
-      opusRecorder.ondataavailable = (data: Uint8Array) => {
-        // opus actually always works at 48khz, so it seems this is the proper value to use here.
-        micDuration = opusRecorder.encodedSamplePosition / 48000;
-        // logging disabled
-        if (chunk_idx < 0) {
-          console.debug(
-            Date.now() % 1000,
-            "Mic Data chunk",
-            chunk_idx++,
-            (opusRecorder.encodedSamplePosition - lastpos) / 48000,
-            micDuration
-          );
-          lastpos = opusRecorder.encodedSamplePosition;
-        }
-        onOpusRecorded(data);
-      };
+      const sampleRateRatio = audioContext.sampleRate / PCM_SAMPLE_RATE;
+      const requiredInputSamples = PCM_FRAME_SAMPLES * sampleRateRatio;
+      let scriptBuffer: number[] = [];
+
+      if (audioContext.audioWorklet) {
+        await audioContext.audioWorklet.addModule("/pcm-audio-processor.js");
+      }
+
+      let captureNode: AudioWorkletNode | ScriptProcessorNode;
+      let cleanupCapture = () => {};
+
+      if (audioContext.audioWorklet) {
+        const workletNode = new AudioWorkletNode(
+          audioContext,
+          "pcm-audio-processor",
+          {
+            numberOfInputs: 1,
+            numberOfOutputs: 0,
+          }
+        );
+        workletNode.port.onmessage = (event: MessageEvent) => {
+          const { pcm } = event.data as { pcm?: ArrayBuffer };
+          if (pcm) {
+            micDuration += PCM_FRAME_SAMPLES / PCM_SAMPLE_RATE;
+            onPcmRecorded(new Uint8Array(pcm));
+          }
+        };
+        source.connect(workletNode);
+        captureNode = workletNode;
+        cleanupCapture = () => {
+          try {
+            workletNode.disconnect();
+          } catch {
+            /* no-op */
+          }
+          try {
+            workletNode.port.close();
+          } catch {
+            /* no-op */
+          }
+        };
+      } else {
+        const processorNode = audioContext.createScriptProcessor(2048, 1, 1);
+        processorNode.onaudioprocess = (event) => {
+          const channelData = event.inputBuffer.getChannelData(0);
+          scriptBuffer = scriptBuffer.concat(Array.from(channelData));
+          while (scriptBuffer.length >= requiredInputSamples) {
+            const segment = scriptBuffer.splice(0, requiredInputSamples);
+            const downsampled = downsample(
+              segment,
+              sampleRateRatio,
+              PCM_FRAME_SAMPLES
+            );
+            micDuration += PCM_FRAME_SAMPLES / PCM_SAMPLE_RATE;
+            onPcmRecorded(floatChunkToInt16(downsampled));
+          }
+        };
+        source.connect(processorNode);
+        captureNode = processorNode;
+        cleanupCapture = () => {
+          try {
+            processorNode.disconnect();
+          } catch {
+            /* no-op */
+          }
+        };
+      }
+
       audioProcessorRef.current = {
         audioContext,
-        opusRecorder,
         decoder,
         outputWorklet,
         inputAnalyser,
         outputAnalyser,
         mediaStreamDestination,
+        captureNode,
+        cleanupCapture,
       };
-      // Resume the audio context if it was suspended
-      audioProcessorRef.current.audioContext.resume();
-      opusRecorder.start();
 
+      await audioContext.resume();
       return audioProcessorRef.current;
     },
-    [onOpusRecorded]
+    [onPcmRecorded]
   );
 
   const shutdownAudio = useCallback(() => {
-    if (audioProcessorRef.current) {
-      const { audioContext, opusRecorder, outputWorklet } =
-        audioProcessorRef.current;
+    const processor = audioProcessorRef.current;
+    if (!processor) return;
 
-      // Disconnect all nodes
-      outputWorklet.disconnect();
-      audioContext.close();
-      opusRecorder.stop();
+    const {
+      audioContext,
+      decoder,
+      outputWorklet,
+      captureNode,
+      cleanupCapture,
+    } = processor;
 
-      // Clear the reference
-      audioProcessorRef.current = null;
+    try {
+      cleanupCapture();
+    } catch {
+      /* no-op */
     }
+
+    try {
+      captureNode.disconnect();
+    } catch {
+      /* no-op */
+    }
+
+    try {
+      outputWorklet.disconnect();
+    } catch {
+      /* no-op */
+    }
+
+    try {
+      decoder.terminate();
+    } catch {
+      /* no-op */
+    }
+
+    try {
+      audioContext.close();
+    } catch {
+      /* no-op */
+    }
+
+    audioProcessorRef.current = null;
   }, []);
 
   return {

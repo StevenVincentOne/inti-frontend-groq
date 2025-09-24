@@ -1,17 +1,16 @@
-export const base64EncodeOpus = (opusData: Uint8Array) => {
-  // Convert to base64
+export const base64EncodeBytes = (data: Uint8Array) => {
   let binary = "";
-  for (let i = 0; i < opusData.byteLength; i++) {
-    binary += String.fromCharCode(opusData[i]);
+  for (let i = 0; i < data.byteLength; i += 1) {
+    binary += String.fromCharCode(data[i]);
   }
   return window.btoa(binary);
 };
 
-export const base64DecodeOpus = (base64String: string): Uint8Array => {
+export const base64DecodeToUint8 = (base64String: string): Uint8Array => {
   const binaryString = window.atob(base64String);
   const len = binaryString.length;
   const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
+  for (let i = 0; i < len; i += 1) {
     bytes[i] = binaryString.charCodeAt(i);
   }
   return bytes;
@@ -28,27 +27,25 @@ export const convertWebmToWav = async (webmBlob: Blob): Promise<Blob> => {
   if (!AudioContextClass) throw new Error("Web Audio API not supported");
   const audioCtx = new AudioContextClass();
   const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-  // Encode to wav
   const wavBuffer = encodeWAV(audioBuffer);
   return new Blob([wavBuffer], { type: "audio/wav" });
 };
 
-// Helper: Encode AudioBuffer to WAV format
 export const encodeWAV = (audioBuffer: AudioBuffer): ArrayBuffer => {
   const numChannels = audioBuffer.numberOfChannels;
   const sampleRate = audioBuffer.sampleRate;
-  const format = 1; // PCM
+  const format = 1;
   const bitDepth = 16;
   const samples = audioBuffer.length * numChannels;
   const buffer = new ArrayBuffer(44 + samples * 2);
   const view = new DataView(buffer);
 
-  // Write WAV header
-  function writeString(view: DataView, offset: number, str: string) {
-    for (let i = 0; i < str.length; i++) {
-      view.setUint8(offset + i, str.charCodeAt(i));
+  const writeString = (dv: DataView, offset: number, str: string) => {
+    for (let i = 0; i < str.length; i += 1) {
+      dv.setUint8(offset + i, str.charCodeAt(i));
     }
-  }
+  };
+
   let offset = 0;
   writeString(view, offset, "RIFF");
   offset += 4;
@@ -77,10 +74,9 @@ export const encodeWAV = (audioBuffer: AudioBuffer): ArrayBuffer => {
   view.setUint32(offset, samples * 2, true);
   offset += 4;
 
-  // Write PCM samples
-  for (let ch = 0; ch < numChannels; ch++) {
+  for (let ch = 0; ch < numChannels; ch += 1) {
     const channel = audioBuffer.getChannelData(ch);
-    for (let i = 0; i < channel.length; i++) {
+    for (let i = 0; i < channel.length; i += 1) {
       const sample = Math.max(-1, Math.min(1, channel[i]));
       view.setInt16(
         44 + (i * numChannels + ch) * 2,

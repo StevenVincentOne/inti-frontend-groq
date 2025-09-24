@@ -2,7 +2,7 @@
 import useWebSocket, { ReadyState } from "react-use-websocket";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMicrophoneAccess } from "./useMicrophoneAccess";
-import { base64DecodeOpus, base64EncodeOpus } from "./audioUtil";
+import { base64DecodeToUint8, base64EncodeBytes } from "./audioUtil";
 import { useAudioProcessor as useAudioProcessor } from "./useAudioProcessor";
 import useKeyboardShortcuts from "./useKeyboardShortcuts";
 import { prettyPrintJson } from "pretty-print-json";
@@ -206,20 +206,18 @@ const Unmute = () => {
   }, [sendMessage]);
 
   // Send microphone audio to the server (via useAudioProcessor below)
-  const onOpusRecorded = useCallback(
-    (opus: Uint8Array) => {
-      console.log('[VoiceWS] 🎤 onOpusRecorded called - audio data:', opus.length, 'bytes, sessionReady:', sessionReadyRef.current);
+  const onPcmRecorded = useCallback(
+    (pcm: Uint8Array) => {
+      console.log('[VoiceWS] 🎤 onPcmRecorded called - audio data:', pcm.length, 'bytes, sessionReady:', sessionReadyRef.current);
 
       if (!sessionReadyRef.current) {
         console.log('[VoiceWS] ⚠️ DROPPING audio frame - session not ready');
-        // Drop audio frames until session is confirmed ready
         return;
       }
 
-      console.log('[VoiceWS] 📤 SENDING audio frame to backend');
       sendMessage(
         createRealtimeMessage("input_audio_buffer.append", {
-          audio: base64EncodeOpus(opus),
+          audio: base64EncodeBytes(pcm),
         })
       );
     },
@@ -227,7 +225,7 @@ const Unmute = () => {
   );
 
   const { setupAudio, shutdownAudio, audioProcessor } =
-    useAudioProcessor(onOpusRecorded);
+    useAudioProcessor(onPcmRecorded);
   const {
     canvasRef: recordingCanvasRef,
     downloadRecording,
@@ -299,49 +297,6 @@ const Unmute = () => {
       console.log('[VoiceWS] Received session.updated, enabling audio send');
       setSessionReady(true);
       sessionReadyRef.current = true;
-
-      // Restart Opus recorder to send a fresh Ogg Opus stream (includes BOS)
-      const ap = audioProcessor.current;
-      if (ap && ap.opusRecorder) {
-        try {
-          console.log('[VoiceWS] 🔄 Starting OpusRecorder restart sequence...');
-          ap.opusRecorder.stop();
-          console.log('[VoiceWS] ⏹️ OpusRecorder stopped');
-
-          setTimeout(() => {
-            try {
-              // Ensure audio context is active
-              if (ap.audioContext.state === 'suspended') {
-                console.log('[VoiceWS] 🔊 Resuming suspended audio context...');
-                ap.audioContext.resume();
-              }
-
-              ap.opusRecorder.start();
-              console.log('[VoiceWS] ✅ OpusRecorder restarted for fresh BOS stream');
-              console.log('[VoiceWS] 🎙️ Audio context state:', ap.audioContext.state);
-              console.log('[VoiceWS] 📊 OpusRecorder sample rate:', ap.opusRecorder.encoderSampleRate);
-
-              // Log when first audio data arrives
-              let firstDataReceived = false;
-              const originalOndataavailable = ap.opusRecorder.ondataavailable;
-              ap.opusRecorder.ondataavailable = (data: Uint8Array) => {
-                if (!firstDataReceived) {
-                  console.log('[VoiceWS] 🎵 FIRST AUDIO DATA after restart:', data.length, 'bytes');
-                  firstDataReceived = true;
-                }
-                originalOndataavailable?.(data);
-              };
-
-            } catch (e) {
-              console.error('[VoiceWS] ❌ Failed to restart OpusRecorder:', e);
-            }
-          }, 50);
-        } catch (e) {
-          console.error('[VoiceWS] ❌ Failed to stop OpusRecorder for restart:', e);
-        }
-      } else {
-        console.warn('[VoiceWS] ⚠️ No audioProcessor or opusRecorder available for restart');
-      }
       return;
     }
     if (data.type === 'input_audio_buffer.speech_stopped') {
@@ -349,16 +304,16 @@ const Unmute = () => {
       // Do not send commit/response.create as these are invalid messages for this backend
       console.log('[VoiceWS] Speech stopped detected by server VAD');
     } else if (data.type === "response.audio.delta") {
-      const opus = base64DecodeOpus(data.delta);
+      const audioBytes = base64DecodeToUint8(data.delta);
       const ap = audioProcessor.current;
       if (!ap) return;
 
       ap.decoder.postMessage(
         {
           command: "decode",
-          pages: opus,
+          pages: audioBytes,
         },
-        [opus.buffer]
+        [audioBytes.buffer]
       );
     } else if (data.type === "unmute.additional_outputs") {
       setDebugDict(data.args.debug_dict);
@@ -676,5 +631,8 @@ const Unmute = () => {
 };
 
 export default Unmute;
+
+
+
 
 
