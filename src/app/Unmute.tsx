@@ -22,24 +22,14 @@ import { useGoogleAnalytics } from "./useGoogleAnalytics";
 import clsx from "clsx";
 import { useBackendServerUrl } from "./useBackendServerUrl";
 import { useRealtimeWebSocketUrl } from "./useRealtimeWebSocketUrl";
-import { COOKIE_CONSENT_STORAGE_KEY } from "./ConsentModal";
 import { IntiFloatingLogo } from "./IntiFloatingLogo";
 import { IntiTextChatSecure as IntiTextChat } from "./components/IntiTextChatSecure";
 import { useAuth } from "./components/IntiCommunicationProvider";
 import { useUCOMessageFormatter } from "./hooks/useUCOMessageFormatter";
 import { useUCO } from "./hooks/useUCO";
-import { buildUCOSystemPrompt, buildUCOSmalltalkInstructions } from "./prompts/ucoSystemPrompt";
-
-// Helper to create OpenAI Realtime API compliant messages
-const createRealtimeMessage = (type: string, data?: any) => {
-  return JSON.stringify({
-    type,
-    event_id: `event_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-    ...data
-  });
-};
 
 const PCM_BYTES_PER_SAMPLE = 2;
+const PCM_SAMPLE_RATE = 24000;
 const isLikelyOgg = (bytes: Uint8Array) =>
   bytes.length >= 4 && bytes[0] === 0x4f && bytes[1] === 0x67 && bytes[2] === 0x67 && bytes[3] === 0x53;
 
@@ -57,7 +47,7 @@ const uint8PcmToFloat32 = (pcmBytes: Uint8Array) => {
 const Unmute = () => {
   const { user } = useAuth();
   const { isDevMode, showSubtitles, toggleSubtitles } = useKeyboardShortcuts();
-  const { formatMessageWithUCO, reset: resetUCO, getTokenStats, isUCOReady, getUCOStatus } = useUCOMessageFormatter();
+  const { formatMessageWithUCO, reset: resetUCO, getUCOStatus } = useUCOMessageFormatter();
   const [debugDict, setDebugDict] = useState<object | null>(null);
   const [unmuteConfig, setUnmuteConfig] = useState<UnmuteConfig>(
     DEFAULT_UNMUTE_CONFIG
@@ -153,15 +143,13 @@ const Unmute = () => {
   const socketUrl = (shouldConnect && webSocketUrl) ? webSocketUrl : null;
 
   // Additional safety: Ensure URL is production URL
-  const finalSocketUrl = socketUrl && socketUrl.includes('localhost') ? null : socketUrl;
-
   // Debug logging for WebSocket URL
   useEffect(() => {
-    console.log('[VoiceWS] Debug - shouldConnect:', shouldConnect, 'webSocketUrl:', webSocketUrl, 'socketUrl:', socketUrl, 'finalSocketUrl:', finalSocketUrl);
-  }, [shouldConnect, webSocketUrl, socketUrl, finalSocketUrl]);
+    console.log('[VoiceWS] Debug - shouldConnect:', shouldConnect, 'webSocketUrl:', webSocketUrl, 'socketUrl:', socketUrl);
+  }, [shouldConnect, webSocketUrl, socketUrl]);
   
   const { sendMessage, lastMessage, readyState } = useWebSocket(
-    finalSocketUrl,
+    socketUrl,
     {
       protocols: realtimeProtocols,
       onOpen: () => {
@@ -178,8 +166,6 @@ const Unmute = () => {
   );
 
   // Keep latest deps in refs to avoid effect re-runs on identity changes
-  const latestUnmuteConfigRef = useRef<UnmuteConfig>(unmuteConfig);
-  useEffect(() => { latestUnmuteConfigRef.current = unmuteConfig; }, [unmuteConfig]);
   const resetUCORef = useRef(resetUCO);
   useEffect(() => { resetUCORef.current = resetUCO; }, [resetUCO]);
   const formatMessageWithUCORef = useRef(formatMessageWithUCO);
@@ -187,10 +173,19 @@ const Unmute = () => {
   const sendMessageRef = useRef(sendMessage);
   useEffect(() => { sendMessageRef.current = sendMessage; }, [sendMessage]);
 
+  const sendJsonMessage = useCallback((payload: Record<string, any>) => {
+    try {
+      const json = JSON.stringify(payload);
+      sendMessageRef.current(json);
+    } catch (err) {
+      console.error('[VoiceWS] Failed to send payload', payload, err);
+    }
+  }, []);
+
   // Removed commitAndRequestResponse - backend uses server-side VAD and triggers inference automatically
 
   // UCO integration helpers
-  const { uco, getMinimalMarkdown } = useUCO();
+  const { uco } = useUCO();
   const sentInitialUCORef = useRef<boolean>(false);
   
   // Add debug effect to track UCO status
@@ -200,25 +195,6 @@ const Unmute = () => {
       console.log('[UCO Debug] Current UCO status:', status);
     }
   }, [uco, isDevMode, getUCOStatus]);
-
-  const sendUCOItem = useCallback((payload: any) => {
-    try {
-      if (!payload) return;
-      const text = typeof payload === 'string' ? payload : JSON.stringify(payload);
-      const msg = {
-        type: "conversation.item.create",
-        item: {
-          role: "user",
-          content: [
-            { type: "input_text", text: `UCO:\n${text}` }
-          ]
-        }
-      } as any;
-      // realtime UCO disabled
-    } catch (e) {
-      console.warn('[UCO] Failed to send UCO item:', e);
-    }
-  }, [sendMessage]);
 
   // Send microphone audio to the server (via useAudioProcessor below)
   const onPcmRecorded = useCallback(
@@ -230,13 +206,14 @@ const Unmute = () => {
         return;
       }
 
-      sendMessage(
-        createRealtimeMessage("input_audio_buffer.append", {
-          audio: base64EncodeBytes(pcm),
-        })
-      );
+      sendJsonMessage({
+        type: "input_audio",
+        data: base64EncodeBytes(pcm),
+        sample_rate: PCM_SAMPLE_RATE,
+        channels: 1,
+      });
     },
-    [sendMessage]
+    [sendJsonMessage]
   );
 
   const { setupAudio, shutdownAudio, audioProcessor } =
@@ -263,6 +240,7 @@ const Unmute = () => {
       }
     } else {
       setShouldConnect(false);
+      sendJsonMessage({ type: 'session_end' });
       shutdownAudio();
     }
   };
@@ -308,20 +286,49 @@ const Unmute = () => {
     if (lastMessage === null) return;
 
     const data = JSON.parse(lastMessage.data);
-    if (data.type === 'session.updated') {
-      console.log('[VoiceWS] Received session.updated, enabling audio send');
+    if (data.type === 'session.ready') {
+      console.log('[VoiceWS] Received session.ready, enabling audio send');
       setSessionReady(true);
       sessionReadyRef.current = true;
       return;
     }
-    if (data.type === 'input_audio_buffer.speech_stopped') {
-      // Server VAD detected end of speech - backend will trigger inference automatically
-      // Do not send commit/response.create as these are invalid messages for this backend
-      console.log('[VoiceWS] Speech stopped detected by server VAD');
-    } else if (data.type === "response.audio.delta") {
-      const audioBytes = base64DecodeToUint8(data.delta);
+    if (data.type === 'transcript') {
+      const text = data.text ?? '';
+      if (!text.trim()) {
+        return;
+      }
+
+      setRawChatHistory((prev) => {
+        const copy = [...prev];
+
+        if (!copy.length || copy[copy.length - 1]?.role !== 'user') {
+          return [...copy, { role: 'user', content: text }];
+        }
+
+        copy[copy.length - 1] = { role: 'user', content: text };
+        return copy;
+      });
+      return;
+    }
+    if (data.type === 'assistant_text') {
+      const text = data.text ?? '';
+      if (!text.trim()) {
+        return;
+      }
+      setRawChatHistory((prev) => [...prev, { role: 'assistant', content: text }]);
+      return;
+    }
+    if (data.type === 'output_audio') {
+      const payload = data.data as string | undefined;
+      if (!payload) {
+        return;
+      }
+
+      const audioBytes = base64DecodeToUint8(payload);
       const ap = audioProcessor.current;
-      if (!ap) return;
+      if (!ap) {
+        return;
+      }
 
       if (isLikelyOgg(audioBytes) && ap.decoder) {
         ap.decoder.postMessage(
@@ -343,7 +350,9 @@ const Unmute = () => {
         },
         [pcmFrame.buffer]
       );
-    } else if (data.type === "unmute.additional_outputs") {
+      return;
+    }
+    if (data.type === "unmute.additional_outputs") {
       setDebugDict(data.args.debug_dict);
     } else if (data.type === "error") {
       if (data.error.type === "warning") {
@@ -353,38 +362,8 @@ const Unmute = () => {
         console.error(`Error from server: ${data.error.message}`, data);
         setErrors((prev) => [...prev, makeErrorItem(data.error.message)]);
       }
-    } else if (
-      data.type === "conversation.item.input_audio_transcription.delta"
-    ) {
-      // Transcription of the user speech
-      setRawChatHistory((prev) => [
-        ...prev,
-        { role: "user", content: data.delta },
-      ]);
-    } else if (data.type === "response.text.delta") {
-      // Text-to-speech output
-      setRawChatHistory((prev) => [
-        ...prev,
-        // The TTS doesn't include spaces in its messages, so add a leading space.
-        // This way we'll get a leading space at the very beginning of the message,
-        // but whatever.
-        { role: "assistant", content: " " + data.delta },
-      ]);
     } else {
-      const ignoredTypes = [
-        "response.created",
-        "response.text.delta",
-        "response.text.done",
-        "response.audio.done",
-        "conversation.item.input_audio_transcription.delta",
-        "input_audio_buffer.speech_started",
-        "unmute.interrupted_by_vad",
-        "unmute.response.text.delta.ready",
-        "unmute.response.audio.delta.ready",
-      ];
-      if (!ignoredTypes.includes(data.type)) {
-        console.warn("Received unknown message:", data);
-      }
+      console.warn("[VoiceWS] Received unsupported message", data);
     }
   }, [audioProcessor, lastMessage]);
 
@@ -394,51 +373,18 @@ const Unmute = () => {
     if (sessionInitializedRef.current) return; // prevent resend loop on rerenders
     sessionInitializedRef.current = true;
 
-    const recordingConsent =
-      localStorage.getItem(COOKIE_CONSENT_STORAGE_KEY) === "true";
-
     setRawChatHistory([]);
     resetUCORef.current(); // Reset UCO formatter for new conversation
     setSessionReady(false);
     sessionReadyRef.current = false;
-    
-    // Build UCO-aware system prompt based on instruction type (from latest ref)
-    const cfg = latestUnmuteConfigRef.current;
-    let ucoInstructions;
-    if (cfg.instructions.type === "constant") {
-      ucoInstructions = {
-        type: "constant",
-        text: buildUCOSystemPrompt(cfg.instructions.text, cfg.instructions.language || "en"),
-        language: cfg.instructions.language
-      };
-    } else if (cfg.instructions.type === "smalltalk") {
-      ucoInstructions = {
-        type: "constant",
-        text: buildUCOSystemPrompt(
-          buildUCOSmalltalkInstructions(),
-          cfg.instructions.language || "en"
-        ),
-        language: cfg.instructions.language
-      };
-    } else {
-      // For other types, keep original with UCO basics added
-      ucoInstructions = cfg.instructions;
+    if (typeof window !== 'undefined') {
+      delete (window as any).__UCO_NOT_READY_LOGGED__;
     }
-    console.log('[VoiceWS] Sending session.update');
-    sendMessageRef.current(
-      createRealtimeMessage("session.update", {
-        session: {
-          instructions: ucoInstructions,
-          voice: cfg.voice,
-          allow_recording: recordingConsent,
-        },
-      })
-    );
 
     // After session setup, wait for UCO readiness before sending initial context
     const sendInitialUCOWhenReady = () => {
       if (sentInitialUCORef.current) return;
-      
+
       try {
         const fm: any = formatMessageWithUCORef.current('', 'session_start', true, true); // waitForReady=true
         
@@ -453,10 +399,13 @@ const Unmute = () => {
         }
         
         if (typeof fm !== 'string') {
-          const ucoPayload = fm.uco || fm.ucoDelta;
-          if (ucoPayload) {
+          const payload = fm.uco || fm.ucoDelta || fm;
+          if (payload) {
             console.log('[UCO] Successfully sent initial UCO context to LLM');
-            /* realtime UCO disabled */
+            sendJsonMessage({
+              type: 'input_text',
+              text: `UCO:\n${JSON.stringify(payload, null, 2)}`,
+            });
             sentInitialUCORef.current = true;
           }
         } else {
@@ -495,49 +444,16 @@ const Unmute = () => {
       if (typeof fm !== 'string') {
         const ucoPayload = fm.ucoDelta || fm.uco; // prefer delta
         if (ucoPayload && Object.keys(ucoPayload || {}).length > 0) {
-          /* realtime UCO disabled */
+          sendJsonMessage({
+            type: 'input_text',
+            text: `UCO_DELTA:\n${JSON.stringify(ucoPayload, null, 2)}`,
+          });
         }
       }
     } catch {
       // ignore
     }
-  }, [uco, readyState, formatMessageWithUCO, sendUCOItem]);
-
-  // On voice/instruction change, update the live session instead of disconnecting.
-  useEffect(() => {
-    if (readyState !== ReadyState.OPEN) return;
-    const cfg = latestUnmuteConfigRef.current;
-    let ucoInstructions;
-    if (cfg.instructions.type === "constant") {
-      ucoInstructions = {
-        type: "constant",
-        text: buildUCOSystemPrompt(cfg.instructions.text, cfg.instructions.language || "en"),
-        language: cfg.instructions.language
-      };
-    } else if (cfg.instructions.type === "smalltalk") {
-      ucoInstructions = {
-        type: "constant",
-        text: buildUCOSystemPrompt(
-          buildUCOSmalltalkInstructions(),
-          cfg.instructions.language || "en"
-        ),
-        language: cfg.instructions.language
-      };
-    } else {
-      ucoInstructions = cfg.instructions;
-    }
-    const recordingConsent = localStorage.getItem(COOKIE_CONSENT_STORAGE_KEY) === "true";
-    console.log('[VoiceWS] Config changed; sending session.update');
-    sendMessageRef.current(
-      createRealtimeMessage("session.update", {
-        session: {
-          instructions: ucoInstructions,
-          voice: cfg.voice,
-          allow_recording: recordingConsent,
-        },
-      })
-    );
-  }, [readyState, unmuteConfig.voice, unmuteConfig.instructions]);
+  }, [uco, readyState, formatMessageWithUCO, sendJsonMessage]);
 
   if (!healthStatus || !backendServerUrl) {
     return (
