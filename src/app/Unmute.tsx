@@ -99,12 +99,27 @@ const Unmute = () => {
           return;
         }
         const data = await response.json();
-        data["connected"] = "yes_request_ok";
 
-        if (data.ok && !data.voice_cloning_up) {
-          console.debug("Voice cloning not available, hiding upload button.");
+        // Handle new Pipecat backend simplified health response
+        // It returns {"status": "ok"} instead of the old format
+        if (data.status === "ok") {
+          setHealthStatus({
+            connected: "yes_request_ok",
+            ok: true,
+            // Set all services as "up" for compatibility
+            tts_up: true,
+            stt_up: true,
+            llm_up: true,
+            voice_cloning_up: false // Voice cloning not supported in Pipecat
+          });
+        } else {
+          // Handle old format or other responses
+          data["connected"] = "yes_request_ok";
+          if (data.ok && !data.voice_cloning_up) {
+            console.debug("Voice cloning not available, hiding upload button.");
+          }
+          setHealthStatus(data);
         }
-        setHealthStatus(data);
       } catch {
         setHealthStatus({
           connected: "no",
