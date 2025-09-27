@@ -65,7 +65,18 @@ export const useAudioProcessor = (
     async (mediaStream: MediaStream) => {
       if (audioProcessorRef.current) return audioProcessorRef.current;
 
-      const audioContext = new AudioContext();
+      let audioContext: AudioContext;
+      try {
+        audioContext = new AudioContext({ sampleRate: PCM_SAMPLE_RATE });
+      } catch {
+        audioContext = new AudioContext();
+      }
+
+      if (audioContext.sampleRate !== PCM_SAMPLE_RATE) {
+        console.warn(
+          `[AudioProcessor] Requested sampleRate ${PCM_SAMPLE_RATE}Hz, actual AudioContext rate: ${audioContext.sampleRate}Hz`
+        );
+      }
       const outputWorklet = await getAudioWorkletNode(
         audioContext,
         "audio-output-processor"

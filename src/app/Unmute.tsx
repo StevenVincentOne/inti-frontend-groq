@@ -33,16 +33,59 @@ const PCM_SAMPLE_RATE = 24000;
 const isLikelyOgg = (bytes: Uint8Array) =>
   bytes.length >= 4 && bytes[0] === 0x4f && bytes[1] === 0x67 && bytes[2] === 0x67 && bytes[3] === 0x53;
 
-const uint8PcmToFloat32 = (pcmBytes: Uint8Array) => {
-  const sampleCount = Math.floor(pcmBytes.byteLength / PCM_BYTES_PER_SAMPLE);
-  const float32 = new Float32Array(sampleCount);
-  const view = new DataView(pcmBytes.buffer, pcmBytes.byteOffset, sampleCount * PCM_BYTES_PER_SAMPLE);
-  for (let i = 0; i < sampleCount; i += 1) {
-    const int16 = view.getInt16(i * PCM_BYTES_PER_SAMPLE, true);
-    float32[i] = int16 / 32768;
+const uint8PcmToFloat32 = (pcmBytes: Uint8Array, channels: number) => {
+  const normalizedChannels = Number.isFinite(channels) && channels > 0 ? Math.floor(channels) : 1;
+  const frameCount = Math.floor(pcmBytes.byteLength / (PCM_BYTES_PER_SAMPLE * normalizedChannels));
+  const float32 = new Float32Array(frameCount);
+  const view = new DataView(
+    pcmBytes.buffer,
+    pcmBytes.byteOffset,
+    frameCount * PCM_BYTES_PER_SAMPLE * normalizedChannels
+  );
+
+  for (let frame = 0; frame < frameCount; frame += 1) {
+    let mixed = 0;
+    for (let channel = 0; channel < normalizedChannels; channel += 1) {
+      const index = frame * normalizedChannels + channel;
+      const int16 = view.getInt16(index * PCM_BYTES_PER_SAMPLE, true);
+      mixed += int16 / 32768;
+    }
+    float32[frame] = mixed / normalizedChannels;
   }
+
   return float32;
 };
+
+const resampleFloat32 = (input: Float32Array, sourceRate: number, targetRate: number) => {
+  if (
+    !input.length ||
+    !Number.isFinite(sourceRate) ||
+    !Number.isFinite(targetRate) ||
+    sourceRate <= 0 ||
+    targetRate <= 0 ||
+    sourceRate === targetRate
+  ) {
+    return input;
+  }
+
+  const ratio = sourceRate / targetRate;
+  const outputLength = Math.max(1, Math.round(input.length / ratio));
+  const output = new Float32Array(outputLength);
+
+  for (let i = 0; i < outputLength; i += 1) {
+    const sourceIndex = i * ratio;
+    const index0 = Math.floor(sourceIndex);
+    const index1 = Math.min(index0 + 1, input.length - 1);
+    const fraction = sourceIndex - index0;
+    const sample0 = input[index0] ?? 0;
+    const sample1 = input[index1] ?? sample0;
+    output[i] = sample0 + (sample1 - sample0) * fraction;
+  }
+
+  return output;
+};
+
+let audioFrameDebugCount = 0;
 
 const Unmute = () => {
   const { user } = useAuth();
@@ -68,6 +111,8 @@ const Unmute = () => {
   const [sessionReady, setSessionReady] = useState(false);
   const sessionReadyRef = useRef(false);
   const sessionInitializedRef = useRef<boolean>(false);
+  const audioDebugRef = useRef({ logged: 0 });
+  const loggedOutputMetaRef = useRef<boolean>(false);
   // const [showLiveText, setShowLiveText] = useState(false);
 
   useWakeLock(shouldConnect);
@@ -340,6 +385,7 @@ const Unmute = () => {
       return;
     }
     if (data.type === 'output_audio') {
+    if (data.type === 'output_audio') {
       const payload = data.data as string | undefined;
       if (!payload) {
         return;
@@ -362,8 +408,117 @@ const Unmute = () => {
         return;
       }
 
-      const pcmFrame = uint8PcmToFloat32(audioBytes);
+      const targetSampleRate = ap.audioContext?.sampleRate ?? PCM_SAMPLE_RATE;
+      const rawIncomingRate = data.sample_rate ?? data.sampleRate;
+      const numericIncomingRate = Number(rawIncomingRate);
+      const resolvedIncomingRate = Number.isFinite(numericIncomingRate) && numericIncomingRate > 0
+        ? numericIncomingRate
+        : targetSampleRate;
+
+      if (isDevMode && !loggedOutputMetaRef.current) {
+        console.debug('[VoiceWS] Received PCM frame', {
+          bytes: audioBytes.length,
+          incomingSampleRate: resolvedIncomingRate,
+          targetSampleRate,
+        });
+        loggedOutputMetaRef.current = true;
+      }
+
+      let pcmFrame = uint8PcmToFloat32(audioBytes);
+      if (resolvedIncomingRate !== targetSampleRate) {
+        pcmFrame = resampleFloat32(pcmFrame, resolvedIncomingRate, targetSampleRate);
+      }
+
       ap.outputWorklet.port.postMessage(
+        {
+          frame: pcmFrame,
+          type: "audio",
+          micDuration: 0,
+        },
+        [pcmFrame.buffer]
+      );
+      return;
+    }
+        });
+      }
+      const incomingSampleRate = Number(rawIncomingRate) > 0 ? Number(rawIncomingRate) : PCM_SAMPLE_RATE;
+      if (process.env.NODE_ENV !== 'production') {
+        console.debug('[VoiceWS] output_audio frame', {
+          byteLength: audioBytes.byteLength,
+          incomingSampleRate,
+          targetSampleRate: ap.audioContext?.sampleRate,
+        });
+      }
+      const targetSampleRate = ap.audioContext?.sampleRate ?? PCM_SAMPLE_RATE;
+      const incomingSampleRateRaw = typeof data.sample_rate === 'number' ? data.sample_rate : (
+        typeof data.sampleRate === 'number' ? data.sampleRate : undefined
+      );
+      const incomingSampleRate = incomingSampleRateRaw && Number.isFinite(incomingSampleRateRaw)
+        ? incomingSampleRateRaw
+        : PCM_SAMPLE_RATE;
+      if (isDevMode && !loggedOutputMetaRef.current) {
+        console.log('[VoiceWS] output_audio chunk meta', {
+          incomingSampleRate,
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[VoiceWS] ▶ output_audio', {
+          bytes: audioBytes.length,
+          incomingSampleRate,
+          targetSampleRate,
+          hasSampleRate: incomingSampleRateRaw,
+        });
+      }
+          targetSampleRate,
+          byteLength: audioBytes.length,
+        });
+        loggedOutputMetaRef.current = true;
+      }
+      if (isDevMode) {
+        console.debug(
+          '[VoiceWS] Received PCM frame',
+          {
+            bytes: audioBytes.length,
+            incomingSampleRate,
+            targetSampleRate,
+          }
+        );
+      }
+      const incomingSampleRate = (() => {
+        if (typeof data.sample_rate === 'number') return data.sample_rate;
+        if (typeof data.sampleRate === 'number') return data.sampleRate;
+        return targetSampleRate;
+      })();
+      let pcmFrame = uint8PcmToFloat32(audioBytes);
+      console.debug('[VoiceWS] output_audio pcm', {
+        length: audioBytes.length,
+        sampleRate: incomingSampleRate,
+        targetSampleRate,
+        frameLength: pcmFrame.length,
+      });
+      if (incomingSampleRate !== targetSampleRate) {
+        pcmFrame = resampleFloat32(pcmFrame, incomingSampleRate, targetSampleRate);
+        console.debug('[VoiceWS] output_audio resampled', {
+          frameLength: pcmFrame.length,
+
+      if (audioDebugRef.current.logged < 5) {
+        console.log(
+          '[VoiceWS] 🔊 audio frame',
+          {
+            incomingSampleRate,
+            targetSampleRate,
+            inputSamples: audioBytes.length / PCM_BYTES_PER_SAMPLE,
+            outputSamples: pcmFrame.length,
+          }
+        );
+        audioDebugRef.current.logged += 1;
+      }
+          targetSampleRate,
+        });
+      }
+      const targetSampleRate = ap.audioContext?.sampleRate ?? PCM_SAMPLE_RATE;
+      const incomingSampleRate =
+        typeof data.sample_rate === 'number' && Number.isFinite(data.sample_rate)
+          ? data.sample_rate
+          : targetSampleRate;
         {
           frame: pcmFrame,
           type: "audio",
