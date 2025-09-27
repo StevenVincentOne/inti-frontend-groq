@@ -4,6 +4,8 @@ import { useIntiCommunication } from './components/IntiCommunicationProvider';
 import { useBackendServerUrl } from './useBackendServerUrl';
 import { VoiceSample, Instructions, UnmuteConfig, DEFAULT_UNMUTE_CONFIG } from './UnmuteConfigurator';
 
+const VOICE_SAMPLES_ENABLED = false;
+
 interface IntiFloatingLogoProps {
   onNavigate?: (route: string) => void;
   onDownloadRecording?: () => void;
@@ -45,20 +47,35 @@ export const IntiFloatingLogo: React.FC<IntiFloatingLogoProps> = ({
   const [voices, setVoices] = useState<VoiceSample[] | null>(null);
   const [customInstructions, setCustomInstructions] = useState<string>('');
   const backendServerUrl = useBackendServerUrl();
+  const voicesAvailable = VOICE_SAMPLES_ENABLED && Array.isArray(voices) && voices.length > 0;
 
   // Fetch voices from backend
   useEffect(() => {
     const fetchVoices = async () => {
-      if (backendServerUrl && !voices) {
-        try {
-          const response = await fetch(`${backendServerUrl}/v1/voices`);
-          if (response.ok) {
-            const voicesData = await response.json();
-            setVoices(voicesData);
-          }
-        } catch (error) {
-          console.error('Error fetching voices:', error);
+      if (voices !== null) {
+        return;
+      }
+
+      if (!VOICE_SAMPLES_ENABLED) {
+        setVoices([]);
+        return;
+      }
+
+      if (!backendServerUrl) {
+        return;
+      }
+
+      try {
+        const response = await fetch(`${backendServerUrl}/v1/voices`);
+        if (response.ok) {
+          const voicesData = await response.json();
+          setVoices(Array.isArray(voicesData) ? voicesData : []);
+        } else {
+          setVoices([]);
         }
+      } catch (error) {
+        console.warn('Voice fetch failed:', error);
+        setVoices([]);
       }
     };
     fetchVoices();
@@ -248,8 +265,12 @@ export const IntiFloatingLogo: React.FC<IntiFloatingLogoProps> = ({
         break;
 
       case 'voices':
-        console.log('Opening Voices modal');
-        setShowVoicesModal(true);
+        if (voicesAvailable) {
+          console.log('Opening Voices modal');
+          setShowVoicesModal(true);
+        } else {
+          console.log('Voices list unavailable; skipping modal');
+        }
         break;
 
       case 'chat':
@@ -377,8 +398,13 @@ export const IntiFloatingLogo: React.FC<IntiFloatingLogoProps> = ({
                 
                 {/* Voices Button */}
                 <button
-                  onClick={() => handleMenuAction('voices')}
-                  className="w-full text-left px-3 py-2 text-white hover:bg-white/10 rounded-md transition-colors flex items-center gap-2"
+                  onClick={() => voicesAvailable && handleMenuAction('voices')}
+                  disabled={!voicesAvailable}
+                  className={`w-full text-left px-3 py-2 rounded-md transition-colors flex items-center gap-2 ${
+                    voicesAvailable
+                      ? 'text-white hover:bg-white/10'
+                      : 'text-gray-500 opacity-60 cursor-not-allowed'
+                  }`}
                 >
                   <span className="text-purple-400">🎭</span>
                   Voices
