@@ -292,6 +292,12 @@ const Unmute = () => {
       sessionReadyRef.current = true;
       return;
     }
+    if (data.type === 'session.ready') {
+      console.log('[VoiceWS] Received session.ready, enabling audio send');
+      setSessionReady(true);
+      sessionReadyRef.current = true;
+      return;
+    }
     if (data.type === 'transcript') {
       const text = data.text ?? '';
       if (!text.trim()) {
